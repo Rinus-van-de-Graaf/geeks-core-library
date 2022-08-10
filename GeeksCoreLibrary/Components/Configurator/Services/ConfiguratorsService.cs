@@ -2,7 +2,10 @@
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using GeeksCoreLibrary.Components.Configurator.Enums;
+using GeeksCoreLibrary.Components.Configurator.Exceptions;
 using GeeksCoreLibrary.Components.Configurator.Interfaces;
 using GeeksCoreLibrary.Components.Configurator.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
@@ -548,15 +551,95 @@ namespace GeeksCoreLibrary.Components.Configurator.Services
         /// <inheritdoc />
         public async Task<ulong> SaveConfigurationAsync(ConfigurationsModel input)
         {
+            if (String.IsNullOrWhiteSpace(input?.Configurator) || input.Items == null || !input.Items.Any())
+            {
+                throw new SaveConfigurationException("Configuration is empty.")
+                {
+                    ErrorCode = SaveConfigurationErrorCodes.InvalidConfiguration
+                };
+            }
+
+            if (input.Quantity <= 0)
+            {
+                throw new SaveConfigurationException($"Quantity '{input.Quantity}' is invalid, needs to be 1 or higher.")
+                {
+                    ErrorCode = SaveConfigurationErrorCodes.InvalidQuantity
+                };
+            }
+
+            var configuratorDataTable = await GetConfiguratorDataAsync(input.Configurator);
+            if (configuratorDataTable == null || configuratorDataTable.Rows.Count == 0)
+            {
+                throw new SaveConfigurationException("No configuration settings found")
+                {
+                    ErrorCode = SaveConfigurationErrorCodes.NoConfigurationSettingsFound
+                };
+            }
+            
+            var prices = await CalculatePriceAsync(input);
+            if (prices.customerPrice <= 0)
+            {
+                throw new SaveConfigurationException($"Customer price calculation returned '{prices.customerPrice}', which is not a valid price.")
+                {
+                    ErrorCode = SaveConfigurationErrorCodes.InvalidPrice
+                };
+            }
+
+            var mainStepCount = 0;
+            var stepCount = 0;
+            var subStepCount = 0;
+
+            var currentMainStepName = "";
+            var currentStepName = "";
+            foreach (DataRow dataRow in configuratorDataTable.Rows)
+            {
+                if (dataRow.Field<string>("mainstepname") != currentMainStepName)
+                {
+                    // This is a new main step.
+                    currentMainStepName = dataRow.Field<string>("mainstepname");
+                    mainStepCount += 1;
+                    stepCount = 0;
+                }
+
+                if (dataRow.Field<string>("stepname") != currentStepName)
+                {
+                    currentStepName = dataRow.Field<string>("stepname");
+                    subStepCount = 0;
+                    stepCount += 1;
+                }
+                
+                if (!String.IsNullOrWhiteSpace(dataRow.Field<string>("substepname")))
+                {
+                    subStepCount += 1;
+                }
+
+                var mainStepIsRequired = !dataRow.IsNull("mainsteps_isrequired") && Convert.ToBoolean(dataRow["mainsteps_isrequired"]);
+                var stepIsRequired = !dataRow.IsNull("isrequired") && Convert.ToBoolean(dataRow["isrequired"]);
+                var subStepIsRequired = !dataRow.IsNull("substep_isrequired") && Convert.ToBoolean(dataRow["substep_isrequired"]);
+                if (!mainStepIsRequired && !stepIsRequired && !subStepIsRequired)
+                {
+                    continue;
+                }
+
+                var currentStep = input.Items.FirstOrDefault(item => item.Value.MainStep == mainStepCount && item.Value.Step == stepCount && item.Value.SubStep == subStepCount);
+
+                if (String.IsNullOrWhiteSpace(currentStep.Value?.Value))
+                {
+                    throw new SaveConfigurationException($"Required step {mainStepCount} / {stepCount} / {subStepCount} is missing.")
+                    {
+                        ErrorCode = SaveConfigurationErrorCodes.MissingRequiredSteps
+                    };
+                }
+            }
+
+            var deliveryTime = await GetDeliveryTimeAsync(input);
+
             var configuration = new WiserItemModel
             {
                 Title = "Configuration",
                 EntityType = "configuration",
                 ModuleId = 854
             };
-
-            var deliveryTime = await GetDeliveryTimeAsync(input);
-            var prices = await CalculatePriceAsync(input);
 
             // add optional 
             var saveConfigQuery = await objectsService.GetSystemObjectValueAsync("CONFIGURATOR_SaveConfigurationQuery");
@@ -638,30 +721,34 @@ namespace GeeksCoreLibrary.Components.Configurator.Services
         private async Task AddItemDetailsFromQueryToWiserItemModelAsync(string query, WiserItemModel item, Dictionary<string, string> parameters = null)
         {
             // if save query is not empty, run query and save result
-            if (!String.IsNullOrWhiteSpace(query))
+            if (String.IsNullOrWhiteSpace(query))
             {
-                databaseConnection.ClearParameters();
-                if (parameters is {Count: > 0})
-                {
-                    foreach (var parameter in parameters)
-                    {
-                        databaseConnection.AddParameter(parameter.Key, parameter.Value);
-                    }
-                }
+                return;
+            }
 
-                var saveConfigLineDataTable = await databaseConnection.GetAsync(query);
-                if (saveConfigLineDataTable.Rows.Count > 0)
+            databaseConnection.ClearParameters();
+            if (parameters is {Count: > 0})
+            {
+                foreach (var parameter in parameters)
                 {
-                    foreach (DataRow row in saveConfigLineDataTable.Rows)
+                    databaseConnection.AddParameter(parameter.Key, parameter.Value);
+                }
+            }
+
+            var saveConfigLineDataTable = await databaseConnection.GetAsync(query);
+            if (saveConfigLineDataTable.Rows.Count > 0)
+            {
+                foreach (DataRow row in saveConfigLineDataTable.Rows)
+                {
+                    var itemDetail = new WiserItemDetailModel
                     {
-                        var itemDetail = new WiserItemDetailModel
-                        {
-                            Key = row.Field<string>("itemdetail_name"),
-                            // we dont know the type that is returned from the query, so we save as is without .field<>
-                            Value = row["itemdetail_value"]
-                        };
-                        item.Details.Add(itemDetail);
-                    }
+                        Key = row.Field<string>("itemdetail_name"),
+
+                        // we dont know the type that is returned from the query, so we save as is without .field<>
+                        Value = row["itemdetail_value"]
+                    };
+
+                    item.Details.Add(itemDetail);
                 }
             }
         }
