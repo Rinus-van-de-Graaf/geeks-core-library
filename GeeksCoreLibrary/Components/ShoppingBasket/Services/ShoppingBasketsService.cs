@@ -24,6 +24,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MySqlX.XDevAPI;
+using MySqlX.XDevAPI.Common;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
 {
@@ -241,6 +245,8 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
             var basketLineValidityMessage = "";
             var basketLineStockActionMessage = "";
 
+            var useDocumentStore = (await objectsService.FindSystemObjectByDomainNameAsync("BASKET_use_document_store", "true")).Equals("true", StringComparison.OrdinalIgnoreCase);
+
             if (itemId == 0UL)
             {
                 if (String.IsNullOrWhiteSpace(encryptedItemId) && !String.IsNullOrWhiteSpace(settings.CookieName))
@@ -262,12 +268,13 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
             var loadBasketFromUser = false;
             var loadedBasketFromCookie = false;
 
-            if (settings.MultipleBasketsPossible && itemId == 0 && String.IsNullOrWhiteSpace(settings.GetBasketQuery))
+            // The GetBasketQuery is not supported when using document store.
+            if (!useDocumentStore && settings.MultipleBasketsPossible && itemId == 0 && String.IsNullOrWhiteSpace(settings.GetBasketQuery))
             {
                 settings.GetBasketQuery = (await templatesService.GetTemplateAsync(name: "GetBasketQuery", type: TemplateTypes.Query)).Content;
             }
 
-            if (settings.MultipleBasketsPossible && itemId == 0 && !String.IsNullOrWhiteSpace(settings.GetBasketQuery))
+            if (!useDocumentStore && settings.MultipleBasketsPossible && itemId == 0 && !String.IsNullOrWhiteSpace(settings.GetBasketQuery))
             {
                 var extraReplacements = new Dictionary<string, object>
                 {
@@ -300,111 +307,128 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
 
             if (!loadBasketFromUser && itemId > 0)
             {
-                // Get details on basket level.
-                shoppingBasket = await wiserItemsService.GetItemDetailsAsync(itemId, entityType: Constants.BasketEntityType, skipPermissionsCheck: true);
-
-                if (shoppingBasket == null || shoppingBasket.EntityType != Constants.BasketEntityType)
+                if (useDocumentStore)
                 {
-                    shoppingBasket = new WiserItemModel();
-                    if (loadedBasketFromCookie)
+                    using var session = MySQLX.GetSession(gclSettings.DocumentStoreConnectionString);
+                    var db = session.GetSchema(gclSettings.DocumentStoreDatabaseName);
+                    var collection = db.GetCollection(Constants.DocumentStoreShoppingBasketsCollectionName);
+                    if (!collection.ExistsInDatabase())
                     {
-                        loadBasketFromUser = true;
+                        logger.LogError($"Tried to load basket from document store, but the collection '{Constants.DocumentStoreShoppingBasketsCollectionName}' doesn't exist!");
+                    }
+                    else
+                    {
+                        // TODO: Try to get shopping basket from the collection and convert it.
                     }
                 }
                 else
                 {
-                    if (shoppingBasket.Id == 0)
+                    // Get details on basket level.
+                    shoppingBasket = await wiserItemsService.GetItemDetailsAsync(itemId, entityType: Constants.BasketEntityType, skipPermissionsCheck: true);
+
+                    if (shoppingBasket == null || shoppingBasket.EntityType != Constants.BasketEntityType)
                     {
-                        basketLines = new List<WiserItemModel>();
+                        shoppingBasket = new WiserItemModel();
+                        if (loadedBasketFromCookie)
+                        {
+                            loadBasketFromUser = true;
+                        }
                     }
                     else
                     {
-                        basketLines = await wiserItemsService.GetLinkedItemDetailsAsync(shoppingBasket.Id, 5002, Constants.BasketLineEntityType, itemIdEntityType: Constants.BasketEntityType, skipPermissionsCheck: true);
-
-                        // UniqueUuid is not used anymore for baskets; Update basket lines to set the UniqueUuid value
-                        // to a separate detail called "uniqueid". UniqueUuid is not cleared though.
-                        foreach (var basketLine in basketLines.Where(basketLine => !basketLine.ContainsDetail("uniqueid") && !String.IsNullOrWhiteSpace(basketLine.UniqueUuid)))
+                        if (shoppingBasket.Id == 0)
                         {
-                            basketLine.SetDetail("uniqueid", basketLine.UniqueUuid);
-                            await wiserItemsService.UpdateAsync(basketLine.Id, basketLine, skipPermissionsCheck: true);
+                            basketLines = new List<WiserItemModel>();
                         }
-                    }
-
-                    if (basketLines.Count == 0 && !recursiveCall)
-                    {
-                        loadBasketFromUser = true;
-                    }
-
-                    if (!loadBasketFromUser)
-                    {
-                        // Retrieve the TempData object, but make sure it doesn't cause a NullReferenceException.
-                        var tempData = tempDataDictionaryFactory?.GetTempData(httpContextAccessor.HttpContext);
-                        var dataKey = $"ShoppingBasketQueriesExecuted_{settings.CookieName}";
-                        var allowGeneralQueries = tempData == null || !tempData.ContainsKey(dataKey) || Convert.ToInt32(tempData[dataKey]) != 1;
-
-                        // Get extra details on line level, overwrite existing details.
-                        if (String.IsNullOrWhiteSpace(settings.ExtraLineFieldsQuery) && allowGeneralQueries)
+                        else
                         {
-                            settings.ExtraLineFieldsQuery = (await templatesService.GetTemplateAsync(name: "BasketExtraLineFields", type: TemplateTypes.Query)).Content;
-                        }
+                            basketLines = await wiserItemsService.GetLinkedItemDetailsAsync(shoppingBasket.Id, 5002, Constants.BasketLineEntityType, itemIdEntityType: Constants.BasketEntityType, skipPermissionsCheck: true);
 
-                        await UpdateLineDetailsViaExtraQueryAsync(shoppingBasket, basketLines, settings, settings.ExtraLineFieldsQuery);
-
-                        // Get extra details on basket level, overwrite existing details.
-                        if (String.IsNullOrEmpty(settings.ExtraMainFieldsQuery) && allowGeneralQueries)
-                        {
-                            // See if there's a template in the QUERY folder called "BasketExtraMainFields".
-                            settings.ExtraMainFieldsQuery = (await templatesService.GetTemplateAsync(name: "BasketExtraMainFields", type: TemplateTypes.Query)).Content;
-                        }
-
-                        await UpdateMainDetailsViaExtraQueryAsync(shoppingBasket, basketLines, settings, settings.ExtraMainFieldsQuery);
-
-                        if (settings.BasketLineValidityCheck && allowGeneralQueries)
-                        {
-                            var basketLineValidityCheckQuery = (await templatesService.GetTemplateAsync(0, "BasketLineValidityCheck", TemplateTypes.Query)).Content;
-                            if (!String.IsNullOrWhiteSpace(basketLineValidityCheckQuery))
+                            // UniqueUuid is not used anymore for baskets; Update basket lines to set the UniqueUuid value
+                            // to a separate detail called "uniqueid". UniqueUuid is not cleared though.
+                            foreach (var basketLine in basketLines.Where(basketLine => !basketLine.ContainsDetail("uniqueid") && !String.IsNullOrWhiteSpace(basketLine.UniqueUuid)))
                             {
-                                logger.LogTrace("UpdateLineDetailsViaLineValidityCheckQuery");
+                                basketLine.SetDetail("uniqueid", basketLine.UniqueUuid);
+                                await wiserItemsService.UpdateAsync(basketLine.Id, basketLine, skipPermissionsCheck: true);
+                            }
+                        }
+
+                        if (basketLines.Count == 0 && !recursiveCall)
+                        {
+                            loadBasketFromUser = true;
+                        }
+
+                        if (!loadBasketFromUser)
+                        {
+                            // Retrieve the TempData object, but make sure it doesn't cause a NullReferenceException.
+                            var tempData = tempDataDictionaryFactory?.GetTempData(httpContextAccessor.HttpContext);
+                            var dataKey = $"ShoppingBasketQueriesExecuted_{settings.CookieName}";
+                            var allowGeneralQueries = tempData == null || !tempData.ContainsKey(dataKey) || Convert.ToInt32(tempData[dataKey]) != 1;
+
+                            // Get extra details on line level, overwrite existing details.
+                            if (String.IsNullOrWhiteSpace(settings.ExtraLineFieldsQuery) && allowGeneralQueries)
+                            {
+                                settings.ExtraLineFieldsQuery = (await templatesService.GetTemplateAsync(name: "BasketExtraLineFields", type: TemplateTypes.Query)).Content;
                             }
 
-                            var (updatedBasketLines, message) = await UpdateLineDetailsViaLineValidityCheckQueryAsync(shoppingBasket, basketLines, settings, basketLineValidityCheckQuery);
-                            basketLines = updatedBasketLines;
-                            basketLineValidityMessage = message;
-                        }
+                            await UpdateLineDetailsViaExtraQueryAsync(shoppingBasket, basketLines, settings, settings.ExtraLineFieldsQuery);
 
-                        if (settings.BasketLineStockAction)
-                        {
-                            var basketLineStockActionQuery = (await templatesService.GetTemplateAsync(0, "BasketLineStockAction", TemplateTypes.Query)).Content;
-                            if (!String.IsNullOrWhiteSpace(basketLineStockActionQuery))
+                            // Get extra details on basket level, overwrite existing details.
+                            if (String.IsNullOrEmpty(settings.ExtraMainFieldsQuery) && allowGeneralQueries)
                             {
-                                logger.LogTrace("UpdateLineDetailsViaLineStockActionQuery");
+                                // See if there's a template in the QUERY folder called "BasketExtraMainFields".
+                                settings.ExtraMainFieldsQuery = (await templatesService.GetTemplateAsync(name: "BasketExtraMainFields", type: TemplateTypes.Query)).Content;
                             }
 
-                            basketLineStockActionMessage = await UpdateLineDetailsViaLineStockActionQuery(shoppingBasket, basketLines, settings, basketLineStockActionQuery);
-                        }
+                            await UpdateMainDetailsViaExtraQueryAsync(shoppingBasket, basketLines, settings, settings.ExtraMainFieldsQuery);
 
-                        if (allowGeneralQueries)
-                        {
-                            tempData[dataKey] = 1;
-                        }
-
-                        if (connectToAccount)
-                        {
-                            var userId = user.MainUserId;
-                            if (userId == 0)
+                            if (settings.BasketLineValidityCheck && allowGeneralQueries)
                             {
-                                userId = accountsService.GetRecentlyCreateAccountId();
-                            }
-
-                            if (userId > 0 && !settings.MultipleBasketsPossible && shoppingBasket.EntityType == Constants.BasketEntityType)
-                            {
-                                foreach (var basketItemId in (await wiserItemsService.GetLinkedItemIdsAsync(userId, Constants.BasketToUserLinkType, Constants.BasketEntityType, skipPermissionsCheck: true)).Where(basketItemId => basketItemId != shoppingBasket.Id))
+                                var basketLineValidityCheckQuery = (await templatesService.GetTemplateAsync(0, "BasketLineValidityCheck", TemplateTypes.Query)).Content;
+                                if (!String.IsNullOrWhiteSpace(basketLineValidityCheckQuery))
                                 {
-                                    await wiserItemsService.DeleteAsync(basketItemId, skipPermissionsCheck: true);
+                                    logger.LogTrace("UpdateLineDetailsViaLineValidityCheckQuery");
                                 }
+
+                                var (updatedBasketLines, message) = await UpdateLineDetailsViaLineValidityCheckQueryAsync(shoppingBasket, basketLines, settings, basketLineValidityCheckQuery);
+                                basketLines = updatedBasketLines;
+                                basketLineValidityMessage = message;
                             }
 
-                            await LinkBasketToUserAsync(settings, userId, shoppingBasket);
+                            if (settings.BasketLineStockAction)
+                            {
+                                var basketLineStockActionQuery = (await templatesService.GetTemplateAsync(0, "BasketLineStockAction", TemplateTypes.Query)).Content;
+                                if (!String.IsNullOrWhiteSpace(basketLineStockActionQuery))
+                                {
+                                    logger.LogTrace("UpdateLineDetailsViaLineStockActionQuery");
+                                }
+
+                                basketLineStockActionMessage = await UpdateLineDetailsViaLineStockActionQuery(shoppingBasket, basketLines, settings, basketLineStockActionQuery);
+                            }
+
+                            if (allowGeneralQueries)
+                            {
+                                tempData[dataKey] = 1;
+                            }
+
+                            if (connectToAccount)
+                            {
+                                var userId = user.MainUserId;
+                                if (userId == 0)
+                                {
+                                    userId = accountsService.GetRecentlyCreateAccountId();
+                                }
+
+                                if (userId > 0 && !settings.MultipleBasketsPossible && shoppingBasket.EntityType == Constants.BasketEntityType)
+                                {
+                                    foreach (var basketItemId in (await wiserItemsService.GetLinkedItemIdsAsync(userId, Constants.BasketToUserLinkType, Constants.BasketEntityType, skipPermissionsCheck: true)).Where(basketItemId => basketItemId != shoppingBasket.Id))
+                                    {
+                                        await wiserItemsService.DeleteAsync(basketItemId, skipPermissionsCheck: true);
+                                    }
+                                }
+
+                                await LinkBasketToUserAsync(settings, userId, shoppingBasket);
+                            }
                         }
                     }
                 }
@@ -444,51 +468,112 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                 newBasket = true;
             }
 
-            if (createNewTransaction) await databaseConnection.BeginTransactionAsync();
-            try
+            var useDocumentStore = (await objectsService.FindSystemObjectByDomainNameAsync("BASKET_use_document_store", "true")).Equals("true", StringComparison.OrdinalIgnoreCase);
+            if (useDocumentStore)
             {
-                shoppingBasket = await wiserItemsService.SaveAsync(shoppingBasket, alwaysSaveValues: true, saveHistory: false, createNewTransaction: false, skipPermissionsCheck: true);
-
-                var lineIds = new List<ulong>();
-
-                foreach (var line in basketLines)
+                var serializerSettings = new JsonSerializerSettings
                 {
-                    if (String.IsNullOrWhiteSpace(line.EntityType) || line.Id == 0UL)
+                    ContractResolver = new DefaultContractResolver
                     {
-                        line.EntityType = Constants.BasketLineEntityType;
-                        line.AddedBy = "GCL";
-                    }
+                        NamingStrategy = new CamelCaseNamingStrategy()
+                    },
+                    Formatting = Formatting.Indented
+                };
 
-                    var lineSaveResult = await wiserItemsService.SaveAsync(line, shoppingBasket.Id, 5002, alwaysSaveValues: true, saveHistory: false, createNewTransaction: false, skipPermissionsCheck: true);
-                    line.Id = lineSaveResult.Id;
+                using var session = MySQLX.GetSession(gclSettings.DocumentStoreConnectionString);
+                var db = session.GetSchema(gclSettings.DocumentStoreDatabaseName);
 
-                    lineIds.Add(line.Id);
+                var shoppingBasketsCollection = db.GetCollection(Constants.DocumentStoreShoppingBasketsCollectionName);
+                if (!shoppingBasketsCollection.ExistsInDatabase())
+                {
+                    // Collection doesn't exist yet, so create it first.
+                    shoppingBasketsCollection = db.CreateCollection(Constants.DocumentStoreShoppingBasketsCollectionName);
+                    // The user ID field will be added as an index for fast lookups.
+                    shoppingBasketsCollection.CreateIndex("userId", JsonConvert.SerializeObject(new
+                    {
+                        fields = new object[]
+                        {
+                            new
+                            {
+                                field = "$.userId",
+                                type = "BIGINT"
+                            }
+                        }
+                    }, serializerSettings));
                 }
 
-                await wiserItemsService.RemoveLinkedItemsAsync(shoppingBasket.Id, 5002, lineIds, entityType: Constants.BasketLineEntityType, createNewTransaction: !createNewTransaction, skipPermissionsCheck: true);
 
+                var item = new
+                {
+                    Main = shoppingBasket,
+                    Lines = basketLines,
+                    user.UserId
+                };
+
+                var basketId = 0UL;
                 if (newBasket)
                 {
-                    if (user is { MainUserId: > 0 })
-                    {
-                        await wiserItemsService.AddItemLinkAsync(shoppingBasket.Id, user.MainUserId, Constants.BasketToUserLinkType, skipPermissionsCheck: true);
-                    }
-                    else
-                    {
-                        var newlyCreatedAccount = accountsService.GetRecentlyCreateAccountId();
-                        if (newlyCreatedAccount > 0)
-                        {
-                            await wiserItemsService.AddItemLinkAsync(shoppingBasket.Id, newlyCreatedAccount, Constants.BasketToUserLinkType, skipPermissionsCheck: true);
-                        }
-                    }
+                    var doc = (await shoppingBasketsCollection.Find().Sort("_id ASC").ExecuteAsync()).LastOrDefault();
+
+                    // The new ID is the current highest ID plus one.
+                    basketId = (doc == null ? 0UL : Convert.ToUInt64(doc.Id)) + 1UL;
+                }
+                else
+                {
+                    basketId = shoppingBasket.Id;
                 }
 
-                if (createNewTransaction) await databaseConnection.CommitTransactionAsync();
+                shoppingBasket.Id = basketId;
+                shoppingBasketsCollection.AddOrReplaceOne(basketId, JsonConvert.SerializeObject(item, serializerSettings));
             }
-            catch
+            else
             {
-                if (createNewTransaction) await databaseConnection.RollbackTransactionAsync();
-                throw;
+                if (createNewTransaction) await databaseConnection.BeginTransactionAsync();
+                try
+                {
+                    shoppingBasket = await wiserItemsService.SaveAsync(shoppingBasket, alwaysSaveValues: true, saveHistory: false, createNewTransaction: false, skipPermissionsCheck: true);
+
+                    var lineIds = new List<ulong>();
+
+                    foreach (var line in basketLines)
+                    {
+                        if (String.IsNullOrWhiteSpace(line.EntityType) || line.Id == 0UL)
+                        {
+                            line.EntityType = Constants.BasketLineEntityType;
+                            line.AddedBy = "GCL";
+                        }
+
+                        var lineSaveResult = await wiserItemsService.SaveAsync(line, shoppingBasket.Id, 5002, alwaysSaveValues: true, saveHistory: false, createNewTransaction: false, skipPermissionsCheck: true);
+                        line.Id = lineSaveResult.Id;
+
+                        lineIds.Add(line.Id);
+                    }
+
+                    await wiserItemsService.RemoveLinkedItemsAsync(shoppingBasket.Id, 5002, lineIds, entityType: Constants.BasketLineEntityType, createNewTransaction: !createNewTransaction, skipPermissionsCheck: true);
+
+                    if (newBasket)
+                    {
+                        if (user is { MainUserId: > 0 })
+                        {
+                            await wiserItemsService.AddItemLinkAsync(shoppingBasket.Id, user.MainUserId, Constants.BasketToUserLinkType, skipPermissionsCheck: true);
+                        }
+                        else
+                        {
+                            var newlyCreatedAccount = accountsService.GetRecentlyCreateAccountId();
+                            if (newlyCreatedAccount > 0)
+                            {
+                                await wiserItemsService.AddItemLinkAsync(shoppingBasket.Id, newlyCreatedAccount, Constants.BasketToUserLinkType, skipPermissionsCheck: true);
+                            }
+                        }
+                    }
+
+                    if (createNewTransaction) await databaseConnection.CommitTransactionAsync();
+                }
+                catch
+                {
+                    if (createNewTransaction) await databaseConnection.RollbackTransactionAsync();
+                    throw;
+                }
             }
 
             // Write basket item ID to cookie.
