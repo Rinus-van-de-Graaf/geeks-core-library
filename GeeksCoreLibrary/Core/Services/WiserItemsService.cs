@@ -33,6 +33,7 @@ namespace GeeksCoreLibrary.Core.Services
         #region Privates
 
         private readonly IDatabaseConnection databaseConnection;
+        private readonly IDocumentStoreConnection documentStoreConnection;
         private readonly IObjectsService objectsService;
         private readonly IStringReplacementsService stringReplacementsService;
         private readonly IDataSelectorsService dataSelectorsService;
@@ -48,9 +49,10 @@ namespace GeeksCoreLibrary.Core.Services
         /// <summary>
         /// Creates a new instance of <see cref="WiserItemsService"/>.
         /// </summary>
-        public WiserItemsService(IDatabaseConnection databaseConnection, IObjectsService objectsService, IStringReplacementsService stringReplacementsService, IDataSelectorsService dataSelectorsService, IDatabaseHelpersService databaseHelpersService, IOptions<GclSettings> gclSettings, ILogger<WiserItemsService> logger)
+        public WiserItemsService(IDatabaseConnection databaseConnection, IDocumentStoreConnection documentStoreConnection, IObjectsService objectsService, IStringReplacementsService stringReplacementsService, IDataSelectorsService dataSelectorsService, IDatabaseHelpersService databaseHelpersService, IOptions<GclSettings> gclSettings, ILogger<WiserItemsService> logger)
         {
             this.databaseConnection = databaseConnection;
+            this.documentStoreConnection = documentStoreConnection;
             this.objectsService = objectsService;
             this.stringReplacementsService = stringReplacementsService;
             this.dataSelectorsService = dataSelectorsService;
@@ -2448,6 +2450,14 @@ VALUES ('UNDELETE_ITEM', 'wiser_item', ?itemId, IFNULL(@_username, USER()), ?ent
                             "hide" => EntityDeletionTypes.Hide,
                             "disallow" => EntityDeletionTypes.Disallow,
                             _ => throw new ArgumentOutOfRangeException("delete_action", dataRow.Field<string>("delete_action"))
+                        },
+                        StoreType = dataRow.Field<string>("store_type")?.ToLowerInvariant() switch
+                        {
+                            null => EntityStoreTypes.Normal,
+                            "normal" => EntityStoreTypes.Normal,
+                            "document_store" => EntityStoreTypes.DocumentStore,
+                            "hybrid" => EntityStoreTypes.Hybrid,
+                            _ => throw new ArgumentOutOfRangeException("store_type", dataRow.Field<string>("store_type"))
                         }
                     };
 

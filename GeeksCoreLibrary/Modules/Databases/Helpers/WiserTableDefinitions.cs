@@ -103,7 +103,7 @@ namespace GeeksCoreLibrary.Modules.Databases.Helpers
             new WiserTableDefinitionModel
             {
                 Name = WiserTableNames.WiserEntity,
-                LastUpdate = new DateTime(2022, 6, 17),
+                LastUpdate = new DateTime(2022, 8, 25),
                 Columns = new List<ColumnSettingsModel>
                 {
                     new("id", MySqlDbType.Int32, notNull: true, isPrimaryKey: true, autoIncrement: true),
@@ -136,7 +136,8 @@ namespace GeeksCoreLibrary.Modules.Databases.Helpers
                     new("icon_expanded", MySqlDbType.VarChar, 25, notNull: true, defaultValue: ""),
                     new("use_dedicated_table", MySqlDbType.Int16, 1, notNull: true, defaultValue: "0"),
                     new("dedicated_table_prefix", MySqlDbType.VarChar, 25, notNull: true, defaultValue: ""),
-                    new("delete_action", MySqlDbType.Enum, notNull: true, defaultValue: "archive", enumValues: new List<string> {"archive", "permanent", "hide", "disallow"})
+                    new("delete_action", MySqlDbType.Enum, notNull: true, defaultValue: "archive", enumValues: new List<string> {"archive", "permanent", "hide", "disallow"}),
+                    new("store_type", MySqlDbType.Enum, notNull: true, defaultValue: "normal", enumValues: new List<string> {"normal", "document_store", "hybrid"})
                 },
                 Indexes = new List<IndexSettingsModel>
                 {

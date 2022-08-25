@@ -14,11 +14,6 @@
 
         public const int BasketToUserLinkType = 5010;
 
-        /// <summary>
-        /// Will be used if the document store is used to store shopping baskets.
-        /// </summary>
-        public const string DocumentStoreShoppingBasketsCollectionName = "wiser_shopping_basket_store";
-
         #region Default settings
 
         internal const string DefaultCookieName = "shoppingBasket";

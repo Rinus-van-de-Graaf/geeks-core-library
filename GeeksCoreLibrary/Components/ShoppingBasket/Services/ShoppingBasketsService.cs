@@ -10,11 +10,13 @@ using GeeksCoreLibrary.Components.Account.Interfaces;
 using GeeksCoreLibrary.Components.ShoppingBasket.Interfaces;
 using GeeksCoreLibrary.Components.ShoppingBasket.Models;
 using GeeksCoreLibrary.Core.DependencyInjection.Interfaces;
+using GeeksCoreLibrary.Core.Enums;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Helpers;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
+using GeeksCoreLibrary.Modules.Databases.Models;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using GeeksCoreLibrary.Modules.Languages.Interfaces;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
@@ -24,10 +26,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using MySqlX.XDevAPI;
-using MySqlX.XDevAPI.Common;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
 
 namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
 {
@@ -36,6 +35,7 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
         private readonly GclSettings gclSettings;
         private readonly ILogger<ShoppingBasketsService> logger;
         private readonly IDatabaseConnection databaseConnection;
+        private readonly IDocumentStoreConnection documentStoreConnection;
         private readonly IHttpContextAccessor httpContextAccessor;
         private readonly IObjectsService objectsService;
         private readonly IWiserItemsService wiserItemsService;
@@ -47,11 +47,12 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
 
         private SortedList<int, decimal> vatFactorsByRate;
 
-        public ShoppingBasketsService(IOptions<GclSettings> gclSettings, ILogger<ShoppingBasketsService> logger, IDatabaseConnection databaseConnection, IHttpContextAccessor httpContextAccessor, IObjectsService objectsService, IWiserItemsService wiserItemsService, IAccountsService accountsService, ITemplatesService templatesService, IStringReplacementsService stringReplacementsService, ITempDataDictionaryFactory tempDataDictionaryFactory, ILanguagesService languagesService)
+        public ShoppingBasketsService(IOptions<GclSettings> gclSettings, ILogger<ShoppingBasketsService> logger, IDatabaseConnection databaseConnection, IDocumentStoreConnection documentStoreConnection, IHttpContextAccessor httpContextAccessor, IObjectsService objectsService, IWiserItemsService wiserItemsService, IAccountsService accountsService, ITemplatesService templatesService, IStringReplacementsService stringReplacementsService, ITempDataDictionaryFactory tempDataDictionaryFactory, ILanguagesService languagesService)
         {
             this.gclSettings = gclSettings.Value;
             this.logger = logger;
             this.databaseConnection = databaseConnection;
+            this.documentStoreConnection = documentStoreConnection;
             this.httpContextAccessor = httpContextAccessor;
             this.objectsService = objectsService;
             this.wiserItemsService = wiserItemsService;
@@ -245,7 +246,7 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
             var basketLineValidityMessage = "";
             var basketLineStockActionMessage = "";
 
-            var useDocumentStore = (await objectsService.FindSystemObjectByDomainNameAsync("BASKET_use_document_store", "true")).Equals("true", StringComparison.OrdinalIgnoreCase);
+            var entitySettings = await wiserItemsService.GetEntityTypeSettingsAsync(Constants.BasketEntityType);
 
             if (itemId == 0UL)
             {
@@ -269,12 +270,12 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
             var loadedBasketFromCookie = false;
 
             // The GetBasketQuery is not supported when using document store.
-            if (!useDocumentStore && settings.MultipleBasketsPossible && itemId == 0 && String.IsNullOrWhiteSpace(settings.GetBasketQuery))
+            if (settings.MultipleBasketsPossible && itemId == 0 && String.IsNullOrWhiteSpace(settings.GetBasketQuery))
             {
                 settings.GetBasketQuery = (await templatesService.GetTemplateAsync(name: "GetBasketQuery", type: TemplateTypes.Query)).Content;
             }
 
-            if (!useDocumentStore && settings.MultipleBasketsPossible && itemId == 0 && !String.IsNullOrWhiteSpace(settings.GetBasketQuery))
+            if (settings.MultipleBasketsPossible && itemId == 0 && !String.IsNullOrWhiteSpace(settings.GetBasketQuery))
             {
                 var extraReplacements = new Dictionary<string, object>
                 {
@@ -307,18 +308,28 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
 
             if (!loadBasketFromUser && itemId > 0)
             {
-                if (useDocumentStore)
+                // Document store is also used when store type is set to hybrid.
+                if (entitySettings.StoreType.InList(EntityStoreTypes.DocumentStore, EntityStoreTypes.Hybrid))
                 {
-                    using var session = MySQLX.GetSession(gclSettings.DocumentStoreConnectionString);
-                    var db = session.GetSchema(gclSettings.DocumentStoreDatabaseName);
-                    var collection = db.GetCollection(Constants.DocumentStoreShoppingBasketsCollectionName);
-                    if (!collection.ExistsInDatabase())
+                    var collectionName = $"{wiserItemsService.GetTablePrefixForEntity(entitySettings)}{WiserTableNames.WiserDocumentStore}";
+
+                    var doc = documentStoreConnection.GetDocumentById(collectionName, itemId);
+
+                    if (doc == null)
                     {
-                        logger.LogError($"Tried to load basket from document store, but the collection '{Constants.DocumentStoreShoppingBasketsCollectionName}' doesn't exist!");
+                        shoppingBasket = new WiserItemModel();
+                        if (loadedBasketFromCookie)
+                        {
+                            loadBasketFromUser = true;
+                        }
                     }
                     else
                     {
-                        // TODO: Try to get shopping basket from the collection and convert it.
+                        var mainItem = Convert.ToString(doc["main"]);
+                        var lines = Convert.ToString(doc["lines"]);
+
+                        shoppingBasket = mainItem != null ? JsonConvert.DeserializeObject<WiserItemModel>(mainItem) : new WiserItemModel();
+                        basketLines = lines != null ? JsonConvert.DeserializeObject<List<WiserItemModel>>(lines) : new List<WiserItemModel>();
                     }
                 }
                 else
@@ -326,7 +337,7 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                     // Get details on basket level.
                     shoppingBasket = await wiserItemsService.GetItemDetailsAsync(itemId, entityType: Constants.BasketEntityType, skipPermissionsCheck: true);
 
-                    if (shoppingBasket == null || shoppingBasket.EntityType != Constants.BasketEntityType)
+                    if (shoppingBasket is not { EntityType: Constants.BasketEntityType })
                     {
                         shoppingBasket = new WiserItemModel();
                         if (loadedBasketFromCookie)
@@ -357,79 +368,79 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                         {
                             loadBasketFromUser = true;
                         }
+                    }
+                }
 
-                        if (!loadBasketFromUser)
+                if (!loadBasketFromUser && shoppingBasket is { Id: > 0 } && basketLines is { Count: > 0 })
+                {
+                    // Retrieve the TempData object, but make sure it doesn't cause a NullReferenceException.
+                    var tempData = tempDataDictionaryFactory?.GetTempData(httpContextAccessor.HttpContext);
+                    var dataKey = $"ShoppingBasketQueriesExecuted_{settings.CookieName}";
+                    var allowGeneralQueries = tempData == null || !tempData.ContainsKey(dataKey) || Convert.ToInt32(tempData[dataKey]) != 1;
+
+                    // Get extra details on line level, overwrite existing details.
+                    if (String.IsNullOrWhiteSpace(settings.ExtraLineFieldsQuery) && allowGeneralQueries)
+                    {
+                        settings.ExtraLineFieldsQuery = (await templatesService.GetTemplateAsync(name: "BasketExtraLineFields", type: TemplateTypes.Query)).Content;
+                    }
+
+                    await UpdateLineDetailsViaExtraQueryAsync(shoppingBasket, basketLines, settings, settings.ExtraLineFieldsQuery);
+
+                    // Get extra details on basket level, overwrite existing details.
+                    if (String.IsNullOrEmpty(settings.ExtraMainFieldsQuery) && allowGeneralQueries)
+                    {
+                        // See if there's a template in the QUERY folder called "BasketExtraMainFields".
+                        settings.ExtraMainFieldsQuery = (await templatesService.GetTemplateAsync(name: "BasketExtraMainFields", type: TemplateTypes.Query)).Content;
+                    }
+
+                    await UpdateMainDetailsViaExtraQueryAsync(shoppingBasket, basketLines, settings, settings.ExtraMainFieldsQuery);
+
+                    if (settings.BasketLineValidityCheck && allowGeneralQueries)
+                    {
+                        var basketLineValidityCheckQuery = (await templatesService.GetTemplateAsync(0, "BasketLineValidityCheck", TemplateTypes.Query)).Content;
+                        if (!String.IsNullOrWhiteSpace(basketLineValidityCheckQuery))
                         {
-                            // Retrieve the TempData object, but make sure it doesn't cause a NullReferenceException.
-                            var tempData = tempDataDictionaryFactory?.GetTempData(httpContextAccessor.HttpContext);
-                            var dataKey = $"ShoppingBasketQueriesExecuted_{settings.CookieName}";
-                            var allowGeneralQueries = tempData == null || !tempData.ContainsKey(dataKey) || Convert.ToInt32(tempData[dataKey]) != 1;
+                            logger.LogTrace("UpdateLineDetailsViaLineValidityCheckQuery");
+                        }
 
-                            // Get extra details on line level, overwrite existing details.
-                            if (String.IsNullOrWhiteSpace(settings.ExtraLineFieldsQuery) && allowGeneralQueries)
+                        var (updatedBasketLines, message) = await UpdateLineDetailsViaLineValidityCheckQueryAsync(shoppingBasket, basketLines, settings, basketLineValidityCheckQuery);
+                        basketLines = updatedBasketLines;
+                        basketLineValidityMessage = message;
+                    }
+
+                    if (settings.BasketLineStockAction)
+                    {
+                        var basketLineStockActionQuery = (await templatesService.GetTemplateAsync(0, "BasketLineStockAction", TemplateTypes.Query)).Content;
+                        if (!String.IsNullOrWhiteSpace(basketLineStockActionQuery))
+                        {
+                            logger.LogTrace("UpdateLineDetailsViaLineStockActionQuery");
+                        }
+
+                        basketLineStockActionMessage = await UpdateLineDetailsViaLineStockActionQuery(shoppingBasket, basketLines, settings, basketLineStockActionQuery);
+                    }
+
+                    if (allowGeneralQueries)
+                    {
+                        tempData[dataKey] = 1;
+                    }
+
+                    if (connectToAccount)
+                    {
+                        var userId = user.MainUserId;
+                        if (userId == 0)
+                        {
+                            userId = accountsService.GetRecentlyCreateAccountId();
+                        }
+
+                        if (userId > 0 && !settings.MultipleBasketsPossible && shoppingBasket.EntityType == Constants.BasketEntityType)
+                        {
+                            foreach (var basketItemId in (await wiserItemsService.GetLinkedItemIdsAsync(userId, Constants.BasketToUserLinkType, Constants.BasketEntityType, skipPermissionsCheck: true)).Where(basketItemId => basketItemId != shoppingBasket.Id))
                             {
-                                settings.ExtraLineFieldsQuery = (await templatesService.GetTemplateAsync(name: "BasketExtraLineFields", type: TemplateTypes.Query)).Content;
-                            }
-
-                            await UpdateLineDetailsViaExtraQueryAsync(shoppingBasket, basketLines, settings, settings.ExtraLineFieldsQuery);
-
-                            // Get extra details on basket level, overwrite existing details.
-                            if (String.IsNullOrEmpty(settings.ExtraMainFieldsQuery) && allowGeneralQueries)
-                            {
-                                // See if there's a template in the QUERY folder called "BasketExtraMainFields".
-                                settings.ExtraMainFieldsQuery = (await templatesService.GetTemplateAsync(name: "BasketExtraMainFields", type: TemplateTypes.Query)).Content;
-                            }
-
-                            await UpdateMainDetailsViaExtraQueryAsync(shoppingBasket, basketLines, settings, settings.ExtraMainFieldsQuery);
-
-                            if (settings.BasketLineValidityCheck && allowGeneralQueries)
-                            {
-                                var basketLineValidityCheckQuery = (await templatesService.GetTemplateAsync(0, "BasketLineValidityCheck", TemplateTypes.Query)).Content;
-                                if (!String.IsNullOrWhiteSpace(basketLineValidityCheckQuery))
-                                {
-                                    logger.LogTrace("UpdateLineDetailsViaLineValidityCheckQuery");
-                                }
-
-                                var (updatedBasketLines, message) = await UpdateLineDetailsViaLineValidityCheckQueryAsync(shoppingBasket, basketLines, settings, basketLineValidityCheckQuery);
-                                basketLines = updatedBasketLines;
-                                basketLineValidityMessage = message;
-                            }
-
-                            if (settings.BasketLineStockAction)
-                            {
-                                var basketLineStockActionQuery = (await templatesService.GetTemplateAsync(0, "BasketLineStockAction", TemplateTypes.Query)).Content;
-                                if (!String.IsNullOrWhiteSpace(basketLineStockActionQuery))
-                                {
-                                    logger.LogTrace("UpdateLineDetailsViaLineStockActionQuery");
-                                }
-
-                                basketLineStockActionMessage = await UpdateLineDetailsViaLineStockActionQuery(shoppingBasket, basketLines, settings, basketLineStockActionQuery);
-                            }
-
-                            if (allowGeneralQueries)
-                            {
-                                tempData[dataKey] = 1;
-                            }
-
-                            if (connectToAccount)
-                            {
-                                var userId = user.MainUserId;
-                                if (userId == 0)
-                                {
-                                    userId = accountsService.GetRecentlyCreateAccountId();
-                                }
-
-                                if (userId > 0 && !settings.MultipleBasketsPossible && shoppingBasket.EntityType == Constants.BasketEntityType)
-                                {
-                                    foreach (var basketItemId in (await wiserItemsService.GetLinkedItemIdsAsync(userId, Constants.BasketToUserLinkType, Constants.BasketEntityType, skipPermissionsCheck: true)).Where(basketItemId => basketItemId != shoppingBasket.Id))
-                                    {
-                                        await wiserItemsService.DeleteAsync(basketItemId, skipPermissionsCheck: true);
-                                    }
-                                }
-
-                                await LinkBasketToUserAsync(settings, userId, shoppingBasket);
+                                await wiserItemsService.DeleteAsync(basketItemId, skipPermissionsCheck: true);
                             }
                         }
+
+                        await LinkBasketToUserAsync(settings, userId, shoppingBasket);
                     }
                 }
             }
@@ -439,12 +450,34 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                 // Check if the user is logged in and has basket from account.
                 if (user is { MainUserId: > 0 } && !settings.MultipleBasketsPossible)
                 {
-                    var linkedBaskets = await wiserItemsService.GetLinkedItemIdsAsync(user.MainUserId, Constants.BasketToUserLinkType, Constants.BasketEntityType, skipPermissionsCheck: true);
-                    var basketId = linkedBaskets.FirstOrDefault(id => id > 0);
-                    if (basketId > 0)
+                    if (entitySettings.StoreType.InList(EntityStoreTypes.DocumentStore, EntityStoreTypes.Hybrid))
                     {
-                        (shoppingBasket, basketLines, _, _) = await LoadAsync(settings, basketId, "", false, true);
-                        WriteEncryptedIdToCookie(shoppingBasket, settings);
+                        var tablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettings);
+
+                        // Try to find a basket linked to the current user.
+                        documentStoreConnection.ClearParameters();
+                        documentStoreConnection.AddParameter("userId", user.MainUserId);
+                        var docs = await documentStoreConnection.GetDocumentsAsync($"{tablePrefix}{WiserTableNames.WiserDocumentStore}", "userId = :userId");
+                        var basketDoc = docs.FirstOrDefault(doc => Convert.ToUInt64(doc.Id) > 0);
+                        if (basketDoc != null)
+                        {
+                            var mainItem = Convert.ToString(basketDoc["main"]);
+                            var lines = Convert.ToString(basketDoc["lines"]);
+
+                            shoppingBasket = mainItem != null ? JsonConvert.DeserializeObject<WiserItemModel>(mainItem) : new WiserItemModel();
+                            basketLines = lines != null ? JsonConvert.DeserializeObject<List<WiserItemModel>>(lines) : new List<WiserItemModel>();
+                            WriteEncryptedIdToCookie(shoppingBasket, settings);
+                        }
+                    }
+                    else
+                    {
+                        var linkedBaskets = await wiserItemsService.GetLinkedItemIdsAsync(user.MainUserId, Constants.BasketToUserLinkType, Constants.BasketEntityType, skipPermissionsCheck: true);
+                        var basketId = linkedBaskets.FirstOrDefault(id => id > 0);
+                        if (basketId > 0)
+                        {
+                            (shoppingBasket, basketLines, _, _) = await LoadAsync(settings, basketId, "", false, true);
+                            WriteEncryptedIdToCookie(shoppingBasket, settings);
+                        }
                     }
                 }
             }
@@ -468,65 +501,12 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                 newBasket = true;
             }
 
-            var useDocumentStore = (await objectsService.FindSystemObjectByDomainNameAsync("BASKET_use_document_store", "true")).Equals("true", StringComparison.OrdinalIgnoreCase);
-            if (useDocumentStore)
-            {
-                var serializerSettings = new JsonSerializerSettings
-                {
-                    ContractResolver = new DefaultContractResolver
-                    {
-                        NamingStrategy = new CamelCaseNamingStrategy()
-                    },
-                    Formatting = Formatting.Indented
-                };
+            var entitySettings = await wiserItemsService.GetEntityTypeSettingsAsync(Constants.BasketEntityType);
+            var basketId = 0UL;
 
-                using var session = MySQLX.GetSession(gclSettings.DocumentStoreConnectionString);
-                var db = session.GetSchema(gclSettings.DocumentStoreDatabaseName);
-
-                var shoppingBasketsCollection = db.GetCollection(Constants.DocumentStoreShoppingBasketsCollectionName);
-                if (!shoppingBasketsCollection.ExistsInDatabase())
-                {
-                    // Collection doesn't exist yet, so create it first.
-                    shoppingBasketsCollection = db.CreateCollection(Constants.DocumentStoreShoppingBasketsCollectionName);
-                    // The user ID field will be added as an index for fast lookups.
-                    shoppingBasketsCollection.CreateIndex("userId", JsonConvert.SerializeObject(new
-                    {
-                        fields = new object[]
-                        {
-                            new
-                            {
-                                field = "$.userId",
-                                type = "BIGINT"
-                            }
-                        }
-                    }, serializerSettings));
-                }
-
-
-                var item = new
-                {
-                    Main = shoppingBasket,
-                    Lines = basketLines,
-                    user.UserId
-                };
-
-                var basketId = 0UL;
-                if (newBasket)
-                {
-                    var doc = (await shoppingBasketsCollection.Find().Sort("_id ASC").ExecuteAsync()).LastOrDefault();
-
-                    // The new ID is the current highest ID plus one.
-                    basketId = (doc == null ? 0UL : Convert.ToUInt64(doc.Id)) + 1UL;
-                }
-                else
-                {
-                    basketId = shoppingBasket.Id;
-                }
-
-                shoppingBasket.Id = basketId;
-                shoppingBasketsCollection.AddOrReplaceOne(basketId, JsonConvert.SerializeObject(item, serializerSettings));
-            }
-            else
+            // If store type is set to hybrid, then save as "normal" first. That way, the wiser_item ID can be used to determine
+            // the ID of the document in the document store collection.
+            if (entitySettings.StoreType.InList(EntityStoreTypes.Normal, EntityStoreTypes.Hybrid))
             {
                 if (createNewTransaction) await databaseConnection.BeginTransactionAsync();
                 try
@@ -568,10 +548,68 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                     }
 
                     if (createNewTransaction) await databaseConnection.CommitTransactionAsync();
+
+                    basketId = shoppingBasket.Id;
                 }
                 catch
                 {
                     if (createNewTransaction) await databaseConnection.RollbackTransactionAsync();
+                    throw;
+                }
+            }
+
+            if (entitySettings.StoreType.InList(EntityStoreTypes.DocumentStore, EntityStoreTypes.Hybrid))
+            {
+                if (createNewTransaction) documentStoreConnection.StartTransaction();
+
+                try
+                {
+                    var tablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettings);
+                    var collectionName = $"{tablePrefix}{WiserTableNames.WiserDocumentStore}";
+                    var shoppingBasketsCollection = documentStoreConnection.GetCollection(collectionName);
+                    if (!shoppingBasketsCollection.ExistsInDatabase())
+                    {
+                        // Collection doesn't exist yet, so create it first.
+                        var indexes = new List<(string Name, DocumentStoreIndexModel)>
+                        {
+                            ("userId", new DocumentStoreIndexModel
+                            {
+                                Fields = new List<DocumentStoreIndexFieldModel>
+                                {
+                                    new() { Field = "$.userId", Type = "BIGINT" }
+                                }
+                            })
+                        };
+
+                        documentStoreConnection.CreateCollection(collectionName, indexes);
+                    }
+
+                    var item = new
+                    {
+                        Main = shoppingBasket,
+                        Lines = basketLines,
+                        user.UserId
+                    };
+
+                    // If the store type is set to hybrid, the ID of wiser_item will be used as the ID of document.
+                    if (newBasket && basketId == 0UL)
+                    {
+                        basketId = await documentStoreConnection.GetNewIdAsync(collectionName);
+                    }
+                    else
+                    {
+                        basketId = shoppingBasket.Id;
+                    }
+
+                    shoppingBasket.Id = basketId;
+                    shoppingBasketsCollection.AddOrReplaceOne(basketId, item);
+                    documentStoreConnection.InsertOrUpdateRecord(collectionName, item, basketId);
+
+                    if (createNewTransaction) documentStoreConnection.CommitTransaction();
+                }
+                catch
+                {
+                    if (createNewTransaction) documentStoreConnection.RollbackTransaction();
                     throw;
                 }
             }
@@ -1892,7 +1930,7 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
 
             foreach (var line in basketLines.Where(line => (line.ContainsDetail("uniqueid") && line.GetDetailValue("uniqueid") == itemIdOrUniqueId) || (line.Id > 0 && line.Id.ToString() == itemIdOrUniqueId) || (line.ContainsDetail(Constants.ConnectedItemIdProperty) && line.GetDetailValue(Constants.ConnectedItemIdProperty) == itemIdOrUniqueId)))
             {
-                line.SetDetail(settings.QuantityPropertyName, quantity.ToString());
+                line.SetDetail(settings.QuantityPropertyName, quantity.ToString(CultureInfo.InvariantCulture));
             }
 
             await RecalculateVariablesAsync(shoppingBasket, basketLines, settings);
@@ -2295,6 +2333,32 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
 
         #region Private functions (helper functions)
 
+        private async Task GetOrCreateDocumentStoreCollectionAsync()
+        {
+            var entitySettings = await wiserItemsService.GetEntityTypeSettingsAsync(Constants.BasketEntityType);
+            var collectionName = $"{wiserItemsService.GetTablePrefixForEntity(entitySettings)}{WiserTableNames.WiserDocumentStore}";
+
+            // Retrieve the collection to check if it exists.
+            var shoppingBasketsCollection = documentStoreConnection.GetCollection(collectionName);
+
+            if (!shoppingBasketsCollection.ExistsInDatabase())
+            {
+                // Collection doesn't exist yet, so create it first.
+                var indexes = new List<(string Name, DocumentStoreIndexModel)>
+                {
+                    ("userId", new DocumentStoreIndexModel
+                    {
+                        Fields = new List<DocumentStoreIndexFieldModel>
+                        {
+                            new() { Field = "$.userId", Type = "BIGINT" }
+                        }
+                    })
+                };
+
+                documentStoreConnection.CreateCollection(collectionName, indexes);
+            }
+        }
+
         private void WriteEncryptedIdToCookie(WiserItemModel shoppingBasket, ShoppingBasketCmsSettingsModel settings)
         {
             var httpContext = httpContextAccessor.HttpContext;
@@ -2613,7 +2677,6 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
             var domainList = domain.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList().FindAll(it => it != "0" && it != "");
             return domainList.Count == 0 || domainList.Contains(HttpContextHelpers.GetHostName(httpContextAccessor.HttpContext));
         }
-
 
         /// <summary>
         /// Internal function used to add or update a line. This function does not save changes or recalculate values.

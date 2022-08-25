@@ -157,6 +157,11 @@ namespace GeeksCoreLibrary.Core.Models
         public EntityDeletionTypes DeleteAction { get; set; } = EntityDeletionTypes.Archive;
 
         /// <summary>
+        /// Gets or sets where items of this type should be stored.
+        /// </summary>
+        public EntityStoreTypes StoreType { get; set; } = EntityStoreTypes.Normal;
+
+        /// <summary>
         /// Gets or sets the query to use for items that are added as template blocks.
         /// You can use '{itemId}' or '?itemId' to use the ID of the item in the query.
         /// </summary>

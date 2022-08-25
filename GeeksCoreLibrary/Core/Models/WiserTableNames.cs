@@ -162,6 +162,11 @@ namespace GeeksCoreLibrary.Core.Models
         /// </summary>
         public const string WiserBranchesQueue = "wiser_branches_queue";
         /// <summary>
+        /// This is the main table name where items are stored if they're stored in the document store.
+        /// Like the normal items table, it can be prefixed if the entity has a table prefix.
+        /// </summary>
+        public const string WiserDocumentStore = "wiser_document_store";
+        /// <summary>
         /// All deleted items will be moved to archive tables, this is the suffix for those archive tables.
         /// </summary>
         public const string ArchiveSuffix = "_archive";
