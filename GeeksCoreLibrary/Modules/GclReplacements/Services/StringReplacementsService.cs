@@ -128,10 +128,11 @@ namespace GeeksCoreLibrary.Modules.GclReplacements.Services
                 {
                     dataDictionary.Clear();
 
-                    r = new Regex(@"\[T{([^\}]+)}]");
-                    foreach (Match m in r.Matches(input))
+                    var variables = forQuery ? GetReplacementVariables(input, "[T{", "}]", null) : GetReplacementVariables(input, "[T{", "}]");
+                    foreach (var variable in variables)
                     {
-                        var value = m.Groups[1].Value;
+                        var value = variable.VariableName;
+
                         if (dataDictionary.ContainsKey(value))
                         {
                             continue;
@@ -155,10 +156,10 @@ namespace GeeksCoreLibrary.Modules.GclReplacements.Services
                         objectsTypeNumber = -100;
                     }
 
-                    r = new Regex(@"\[O{([^\}]+)}]");
-                    foreach (Match m in r.Matches(input))
+                    var variables = forQuery ? GetReplacementVariables(input, "[O{", "}]", null) : GetReplacementVariables(input, "[O{", "}]");
+                    foreach (var variable in variables)
                     {
-                        var value = m.Groups[1].Value;
+                        var value = variable.VariableName;
                         if (dataDictionary.ContainsKey(value))
                         {
                             continue;
