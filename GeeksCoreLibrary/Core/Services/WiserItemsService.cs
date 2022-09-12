@@ -18,7 +18,6 @@ using GeeksCoreLibrary.Core.Exceptions;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Models;
 using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
-using GeeksCoreLibrary.Modules.DataSelector.Models;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -207,7 +206,7 @@ UPDATE {tablePrefix}{WiserTableNames.WiserItem} SET parent_item_id = ?parentId, 
                 else
                 {
                     var linkTablePrefix = wiserItemsService.GetTablePrefixForLink(linkTypeSettings);
-                    
+
                     // Save parent ID in wiser_itemlink.
                     var newOrderNumber = 1;
                     queryResult = await databaseConnection.GetAsync($"SELECT IFNULL(MAX(ordering), 0) + 1 AS newOrderNumber FROM {linkTablePrefix}{WiserTableNames.WiserItemLink} WHERE destination_item_id = ?parentId", true);
@@ -3966,6 +3965,17 @@ VALUES ('UNDELETE_ITEM', 'wiser_item', ?itemId, IFNULL(@_username, USER()), ?ent
             }
 
             return template;
+        }
+
+        /// <inheritdoc />
+        public async Task<string> GetDocumentStoreCollectionNameAsync(string entityName)
+        {
+            // Check if a table prefix is set for this entity.
+            var entityTypeSettings = await GetEntityTypeSettingsAsync(entityName);
+            var tablePrefix = GetTablePrefixForEntity(entityTypeSettings);
+
+            // Return the name.
+            return $"{tablePrefix}{WiserTableNames.WiserDocumentStore}";
         }
 
         #endregion

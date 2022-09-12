@@ -518,5 +518,11 @@ namespace GeeksCoreLibrary.Core.Services
         {
             return await wiserItemsService.ReplaceAllEntityBlocksAsync(template);
         }
+
+        /// <inheritdoc />
+        public async Task<string> GetDocumentStoreCollectionNameAsync(string entityName)
+        {
+            return await wiserItemsService.GetDocumentStoreCollectionNameAsync(entityName);
+        }
     }
 }

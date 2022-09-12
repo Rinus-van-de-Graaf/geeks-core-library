@@ -54,20 +54,20 @@ public class DocumentStoreConnection : IDocumentStoreConnection, IScopedService
     public string ConnectedDatabase { get; private set; }
 
     /// <inheritdoc />
-    public Collection CreateCollection(string name, List<(string Name, DocumentStoreIndexModel)> indexes)
+    public Collection CreateCollection(string collectionName, List<(string Name, DocumentStoreIndexModel Indexes)> collectionIndexes)
     {
         EnsureOpenSession();
 
-        var collection = Session.Schema.CreateCollection(name, true);
-        if (indexes == null)
+        var collection = Session.Schema.CreateCollection(collectionName, true);
+        if (collectionIndexes == null)
         {
             return collection;
         }
 
         // Create indexes.
-        foreach (var index in indexes)
+        foreach (var (name, indexes) in collectionIndexes)
         {
-            collection.CreateIndex(index.Name, JsonConvert.SerializeObject(index, jsonSerializerSettings));
+            collection.CreateIndex(name, JsonConvert.SerializeObject(indexes, jsonSerializerSettings));
         }
 
         return collection;
@@ -104,7 +104,7 @@ public class DocumentStoreConnection : IDocumentStoreConnection, IScopedService
             findStatement.Bind(parameter.Key, parameter.Value);
         }
 
-        var documents = await findStatement.ExecuteAsync();
+        using var documents = await findStatement.ExecuteAsync();
 
         // Return the ReadOnlyCollection of documents.
         return documents.FetchAll();
@@ -158,10 +158,29 @@ public class DocumentStoreConnection : IDocumentStoreConnection, IScopedService
     }
 
     /// <inheritdoc />
-    public Result InsertOrUpdateRecord(string collectionName, object item, ulong id = 0)
+    public async Task<Result> InsertOrUpdateDocumentAsync(string collectionName, object item, ulong id = 0)
     {
         var collection = GetCollection(collectionName);
-        return collection.AddOrReplaceOne(id > 0 ? id : null, JsonConvert.SerializeObject(item, jsonSerializerSettings));
+
+        var jsonItem = JsonConvert.SerializeObject(item, jsonSerializerSettings);
+
+        if (id == 0UL)
+        {
+            // New item.
+            return await collection.Add(jsonItem).ExecuteAsync();
+        }
+
+        // It's unknown what the first 12 characters of the ID is, so only match the ID by the last 16 characters by converting the ID
+        // to hex, and padding the left side of the value with zeroes.
+        var idParam = id.ToString("x").PadLeft(16, '0');
+        return await collection.Modify("_id LIKE :docId").Patch(jsonItem).Bind("docId", $"%{idParam}").ExecuteAsync();
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> ModifyDocumentByIdAsync(string collectionName, string id, object item)
+    {
+        var collection = GetCollection(collectionName);
+        return await collection.Modify("_id = :docId").Patch(JsonConvert.SerializeObject(item, jsonSerializerSettings)).Bind("docId", id).ExecuteAsync();
     }
 
     /// <inheritdoc />
@@ -181,16 +200,6 @@ public class DocumentStoreConnection : IDocumentStoreConnection, IScopedService
     public void RollbackTransaction()
     {
         Session.Rollback();
-    }
-
-    /// <inheritdoc />
-    public async Task<ulong> GetNewIdAsync(string collectionName)
-    {
-        var collection = GetCollection(collectionName);
-        var doc = (await collection.Find().Sort("_id ASC").ExecuteAsync()).LastOrDefault();
-
-        // The new ID is the current highest ID plus one.
-        return (doc == null ? 0UL : Convert.ToUInt64(doc.Id)) + 1UL;
     }
 
     /// <inheritdoc />

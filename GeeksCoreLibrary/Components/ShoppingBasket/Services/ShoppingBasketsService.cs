@@ -311,9 +311,11 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                 // Document store is also used when store type is set to hybrid.
                 if (entitySettings.StoreType.InList(EntityStoreTypes.DocumentStore, EntityStoreTypes.Hybrid))
                 {
-                    var collectionName = $"{wiserItemsService.GetTablePrefixForEntity(entitySettings)}{WiserTableNames.WiserDocumentStore}";
-
-                    var doc = documentStoreConnection.GetDocumentById(collectionName, itemId);
+                    var collectionName = await wiserItemsService.GetDocumentStoreCollectionNameAsync(Constants.BasketEntityType);
+                    var collection = documentStoreConnection.GetCollection(collectionName);
+                    var idParam = itemId.ToString("x").PadLeft(16, '0');
+                    using var findResult = await collection.Find("_id LIKE :itemId").Bind("itemId", $"%{idParam}").ExecuteAsync();
+                    var doc = findResult.FetchOne();
 
                     if (doc == null)
                     {
@@ -325,11 +327,11 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                     }
                     else
                     {
-                        var mainItem = Convert.ToString(doc["main"]);
-                        var lines = Convert.ToString(doc["lines"]);
+                        var mainItemValue = doc["main"];
+                        var linesValue = doc["lines"];
 
-                        shoppingBasket = mainItem != null ? JsonConvert.DeserializeObject<WiserItemModel>(mainItem) : new WiserItemModel();
-                        basketLines = lines != null ? JsonConvert.DeserializeObject<List<WiserItemModel>>(lines) : new List<WiserItemModel>();
+                        shoppingBasket = mainItemValue != null ? JsonConvert.DeserializeObject<WiserItemModel>(JsonConvert.SerializeObject(mainItemValue)) : new WiserItemModel();
+                        basketLines = linesValue != null ? JsonConvert.DeserializeObject<List<WiserItemModel>>(JsonConvert.SerializeObject(linesValue)) : new List<WiserItemModel>();
                     }
                 }
                 else
@@ -452,12 +454,12 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                 {
                     if (entitySettings.StoreType.InList(EntityStoreTypes.DocumentStore, EntityStoreTypes.Hybrid))
                     {
-                        var tablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettings);
+                        var collectionName = await wiserItemsService.GetDocumentStoreCollectionNameAsync(Constants.BasketEntityType);
 
                         // Try to find a basket linked to the current user.
                         documentStoreConnection.ClearParameters();
                         documentStoreConnection.AddParameter("userId", user.MainUserId);
-                        var docs = await documentStoreConnection.GetDocumentsAsync($"{tablePrefix}{WiserTableNames.WiserDocumentStore}", "userId = :userId");
+                        var docs = await documentStoreConnection.GetDocumentsAsync(collectionName, "userId = :userId");
                         var basketDoc = docs.FirstOrDefault(doc => Convert.ToUInt64(doc.Id) > 0);
                         if (basketDoc != null)
                         {
@@ -504,6 +506,13 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
             var entitySettings = await wiserItemsService.GetEntityTypeSettingsAsync(Constants.BasketEntityType);
             var basketId = 0UL;
 
+            // Make sure new lines have the proper line type and have the "AddedBy" property set to "GCL".
+            foreach (var line in basketLines.Where(line => String.IsNullOrWhiteSpace(line.EntityType) || line.Id == 0UL))
+            {
+                line.EntityType = Constants.BasketLineEntityType;
+                line.AddedBy = "GCL";
+            }
+
             // If store type is set to hybrid, then save as "normal" first. That way, the wiser_item ID can be used to determine
             // the ID of the document in the document store collection.
             if (entitySettings.StoreType.InList(EntityStoreTypes.Normal, EntityStoreTypes.Hybrid))
@@ -517,12 +526,6 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
 
                     foreach (var line in basketLines)
                     {
-                        if (String.IsNullOrWhiteSpace(line.EntityType) || line.Id == 0UL)
-                        {
-                            line.EntityType = Constants.BasketLineEntityType;
-                            line.AddedBy = "GCL";
-                        }
-
                         var lineSaveResult = await wiserItemsService.SaveAsync(line, shoppingBasket.Id, 5002, alwaysSaveValues: true, saveHistory: false, createNewTransaction: false, skipPermissionsCheck: true);
                         line.Id = lineSaveResult.Id;
 
@@ -558,30 +561,27 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                 }
             }
 
+            // Check if the basket should be saved in the document store.
             if (entitySettings.StoreType.InList(EntityStoreTypes.DocumentStore, EntityStoreTypes.Hybrid))
             {
                 if (createNewTransaction) documentStoreConnection.StartTransaction();
 
                 try
                 {
-                    var tablePrefix = wiserItemsService.GetTablePrefixForEntity(entitySettings);
-                    var collectionName = $"{tablePrefix}{WiserTableNames.WiserDocumentStore}";
-                    var shoppingBasketsCollection = documentStoreConnection.GetCollection(collectionName);
-                    if (!shoppingBasketsCollection.ExistsInDatabase())
-                    {
-                        // Collection doesn't exist yet, so create it first.
-                        var indexes = new List<(string Name, DocumentStoreIndexModel)>
-                        {
-                            ("userId", new DocumentStoreIndexModel
-                            {
-                                Fields = new List<DocumentStoreIndexFieldModel>
-                                {
-                                    new() { Field = "$.userId", Type = "BIGINT" }
-                                }
-                            })
-                        };
+                    var collectionName = await wiserItemsService.GetDocumentStoreCollectionNameAsync(Constants.BasketEntityType);
+                    await CreateDocumentStoreCollectionAsync();
 
-                        documentStoreConnection.CreateCollection(collectionName, indexes);
+                    // Basket lines will not have an ID if they're stored only in the document store.
+                    // To make sure the ID property can be used as normal, an ID is assigned to any
+                    // lines that are still 0.
+                    if (entitySettings.StoreType == EntityStoreTypes.DocumentStore)
+                    {
+                        var counter = basketLines.Max(line => line.Id) + 1UL;
+
+                        foreach (var line in basketLines.Where(line => String.IsNullOrWhiteSpace(line.EntityType) || line.Id == 0UL))
+                        {
+                            line.Id = counter++;
+                        }
                     }
 
                     var item = new
@@ -592,18 +592,24 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                     };
 
                     // If the store type is set to hybrid, the ID of wiser_item will be used as the ID of document.
-                    if (newBasket && basketId == 0UL)
-                    {
-                        basketId = await documentStoreConnection.GetNewIdAsync(collectionName);
-                    }
-                    else
+                    if (!newBasket || basketId != 0UL)
                     {
                         basketId = shoppingBasket.Id;
                     }
 
                     shoppingBasket.Id = basketId;
-                    shoppingBasketsCollection.AddOrReplaceOne(basketId, item);
-                    documentStoreConnection.InsertOrUpdateRecord(collectionName, item, basketId);
+                    var insertOrUpdateResult = await documentStoreConnection.InsertOrUpdateDocumentAsync(collectionName, item, basketId);
+
+                    if (basketId == 0UL && insertOrUpdateResult.GeneratedIds.Count > 0)
+                    {
+                        // Document store IDs consist of 28 characters. The first 12 define a header, and the last 16 represent an increment
+                        // value, stored in hex format. To determine the new ID, the last 16 characters are taken and are converted to a UInt64.
+                        var newId = insertOrUpdateResult.GeneratedIds[0];
+                        shoppingBasket.Id = Convert.ToUInt64(newId[12..], 16);
+
+                        // Modify the document by updating the ID of the serialized basket to match the ID of the document itself.
+                        await documentStoreConnection.ModifyDocumentByIdAsync(collectionName, newId, new { Main = new { shoppingBasket.Id } });
+                    }
 
                     if (createNewTransaction) documentStoreConnection.CommitTransaction();
                 }
@@ -2333,10 +2339,12 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
 
         #region Private functions (helper functions)
 
-        private async Task GetOrCreateDocumentStoreCollectionAsync()
+        /// <summary>
+        /// Ensures the collection for the document store exists.
+        /// </summary>
+        private async Task CreateDocumentStoreCollectionAsync()
         {
-            var entitySettings = await wiserItemsService.GetEntityTypeSettingsAsync(Constants.BasketEntityType);
-            var collectionName = $"{wiserItemsService.GetTablePrefixForEntity(entitySettings)}{WiserTableNames.WiserDocumentStore}";
+            var collectionName = await wiserItemsService.GetDocumentStoreCollectionNameAsync(Constants.BasketEntityType);
 
             // Retrieve the collection to check if it exists.
             var shoppingBasketsCollection = documentStoreConnection.GetCollection(collectionName);

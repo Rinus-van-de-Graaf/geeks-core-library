@@ -867,5 +867,14 @@ namespace GeeksCoreLibrary.Core.Interfaces
         /// <param name="template">The HTML template that might contain one or more entity blocks.</param>
         /// <returns>The same template but with all entity blocks fully rendered.</returns>
         Task<string> ReplaceAllEntityBlocksAsync(string template);
+
+        /// <summary>
+        /// Creates the name for a document store collection for an entity (which is also the name of the MySQL table).
+        /// The table prefix setting of the entity will be used to determine the name. Otherwise, the entity will simply be saved in
+        /// the general Wiser document store.
+        /// </summary>
+        /// <param name="entityName">The name of the entity.</param>
+        /// <returns>The name of the collection.</returns>
+        Task<string> GetDocumentStoreCollectionNameAsync(string entityName);
     }
 }
