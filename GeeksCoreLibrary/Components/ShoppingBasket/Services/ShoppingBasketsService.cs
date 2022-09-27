@@ -312,6 +312,8 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                 if (entitySettings.StoreType.InList(EntityStoreTypes.DocumentStore, EntityStoreTypes.Hybrid))
                 {
                     var collectionName = await wiserItemsService.GetDocumentStoreCollectionNameAsync(Constants.BasketEntityType);
+                    await CreateDocumentStoreCollectionAsync();
+
                     var collection = documentStoreConnection.GetCollection(collectionName);
                     var idParam = itemId.ToString("x").PadLeft(16, '0');
                     using var findResult = await collection.Find("_id LIKE :itemId").Bind("itemId", $"%{idParam}").ExecuteAsync();
@@ -455,6 +457,7 @@ namespace GeeksCoreLibrary.Components.ShoppingBasket.Services
                     if (entitySettings.StoreType.InList(EntityStoreTypes.DocumentStore, EntityStoreTypes.Hybrid))
                     {
                         var collectionName = await wiserItemsService.GetDocumentStoreCollectionNameAsync(Constants.BasketEntityType);
+                        await CreateDocumentStoreCollectionAsync();
 
                         // Try to find a basket linked to the current user.
                         documentStoreConnection.ClearParameters();
@@ -2419,23 +2422,25 @@ WHERE coupon.entity_type = 'coupon'", true);
 
             // Retrieve the collection to check if it exists.
             var shoppingBasketsCollection = documentStoreConnection.GetCollection(collectionName);
-
-            if (!shoppingBasketsCollection.ExistsInDatabase())
+            if (shoppingBasketsCollection.ExistsInDatabase())
             {
-                // Collection doesn't exist yet, so create it first.
-                var indexes = new List<(string Name, DocumentStoreIndexModel)>
-                {
-                    ("userId", new DocumentStoreIndexModel
-                    {
-                        Fields = new List<DocumentStoreIndexFieldModel>
-                        {
-                            new() { Field = "$.userId", Type = "BIGINT" }
-                        }
-                    })
-                };
-
-                documentStoreConnection.CreateCollection(collectionName, indexes);
+                // Collection exists; no actions required.
+                return;
             }
+
+            // Collection doesn't exist yet, so create it first.
+            var indexes = new List<(string Name, DocumentStoreIndexModel)>
+            {
+                ("userId", new DocumentStoreIndexModel
+                {
+                    Fields = new List<DocumentStoreIndexFieldModel>
+                    {
+                        new() { Field = "$.userId", Type = "BIGINT" }
+                    }
+                })
+            };
+
+            documentStoreConnection.CreateCollection(collectionName, indexes);
         }
 
         private void WriteEncryptedIdToCookie(WiserItemModel shoppingBasket, ShoppingBasketCmsSettingsModel settings)
