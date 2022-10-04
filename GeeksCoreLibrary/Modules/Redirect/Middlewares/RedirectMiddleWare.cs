@@ -63,7 +63,7 @@ namespace GeeksCoreLibrary.Modules.Redirect.Middlewares
                 {
                     var fullUri = String.IsNullOrEmpty(redirectToUrl) ? HttpContextHelpers.GetOriginalRequestUri(context) : new Uri(redirectToUrl);
                     var currentDomain = fullUri.Host;
-                    var ignoreDomains = (await objectsService.FindSystemObjectByDomainNameAsync("noredirectonurlonhost")).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    var ignoreDomains = (await objectsService.FindSystemObjectByDomainNameAsync("hostnames_without_redirects")).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
                     if (currentDomain != mainDomainForRedirect && !ignoreDomains.Contains(currentDomain, StringComparer.OrdinalIgnoreCase))
                     {

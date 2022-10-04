@@ -63,6 +63,18 @@ namespace GeeksCoreLibrary.Modules.Objects.Services
                 {
                     objects.Add($"{reader.GetStringHandleNull("key")}{reader.GetInt32(reader.GetOrdinal("typenr"))}", reader.ToObjectModel());
                 }
+                
+                //Objects managed in Wiser3 are setup differently
+                await using var reader2 = await databaseConnection.GetReaderAsync(@"SET @numberofGCLsettings = (SELECT COUNT(*) AS aantal FROM wiser_item GCLsettings WHERE GCLsettings.entity_type='GCLsettings');
+                                                                                         
+                                                                                         SELECT CONCAT_WS('_',settings.`key`,IF(@numberofGCLsettings>1,GCLsettings.title,null)) AS `key`, CONCAT_WS('',settings.`value`,settings.`long_value`) AS `value`, null AS description, -1 AS typenr
+                                                                                         FROM wiser_item GCLsettings 
+                                                                                         LEFT JOIN wiser_itemdetail settings ON settings.item_id=GCLsettings.id 
+                                                                                         WHERE GCLsettings.entity_type='GCLsettings'");
+                while (await reader2.ReadAsync())
+                {
+                    objects.Add($"{reader2.GetStringHandleNull("key")}{reader2.GetInt32(reader.GetOrdinal("typenr"))}", reader2.ToObjectModel());
+                }
 
                 return objects;
             }

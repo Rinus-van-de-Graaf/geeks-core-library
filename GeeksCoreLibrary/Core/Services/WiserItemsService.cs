@@ -3412,7 +3412,8 @@ VALUES ('UNDELETE_ITEM', 'wiser_item', ?itemId, IFNULL(@_username, USER()), ?ent
 
             // Replace the use of the full domain name for the image if setup.
             var testDomain = await objectsService.FindSystemObjectByDomainNameAsync("testdomainjuice");
-            var requireSsl = String.Equals(await objectsService.FindSystemObjectByDomainNameAsync("requiressl"), "true", StringComparison.OrdinalIgnoreCase);
+            var result = await objectsService.FindSystemObjectByDomainNameAsync("redirect_https");
+            var requireSsl = String.Equals( result, "true", StringComparison.OrdinalIgnoreCase) || String.Equals(result, "1", StringComparison.OrdinalIgnoreCase);
             if (!String.IsNullOrWhiteSpace(testDomain))
             {
                 output = output.Replace($"src=\"http://{testDomain}",

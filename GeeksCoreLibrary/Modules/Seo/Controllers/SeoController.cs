@@ -27,7 +27,7 @@ namespace GeeksCoreLibrary.Modules.Seo.Controllers
         [Route("robots.txt"), HttpGet]
         public async Task<IActionResult> Robots()
         {
-            var robotsTxt = await objectsService.FindSystemObjectByDomainNameAsync("robotstxt");
+            var robotsTxt = await objectsService.FindSystemObjectByDomainNameAsync("robots_txt");
 
             if (gclSettings.Environment != Environments.Live) // Do not index dev and test environments
             {

@@ -85,21 +85,21 @@ namespace GeeksCoreLibrary.Modules.Redirect.Services
         /// <inheritdoc />
         public async Task<bool> ShouldRedirectToUrlWithTrailingSlashAsync()
         {
-            var result = await objectsService.FindSystemObjectByDomainNameAsync("redirectRequiresTrailingSlash");
+            var result = await objectsService.FindSystemObjectByDomainNameAsync("redirect_to_trailingslash");
             return result.Equals("1", StringComparison.Ordinal) || result.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <inheritdoc />
         public async Task<bool> ShouldRedirectToLowerCaseUrlAsync()
         {
-            var result = await objectsService.FindSystemObjectByDomainNameAsync("redirectRequiresLowerCase");
+            var result = await objectsService.FindSystemObjectByDomainNameAsync("redirect_to_lowercase");
             return result.Equals("1", StringComparison.Ordinal) || result.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <inheritdoc />
         public async Task<bool> ShouldRedirectToHttpsAsync()
         {
-            var result = await objectsService.FindSystemObjectByDomainNameAsync("requiressl");
+            var result = await objectsService.FindSystemObjectByDomainNameAsync("redirect_https");
             return result.Equals("1", StringComparison.Ordinal) || result.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
     }
