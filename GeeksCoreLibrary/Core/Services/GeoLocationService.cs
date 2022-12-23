@@ -7,7 +7,6 @@ using GeeksCoreLibrary.Core.Models;
 using GeeksCoreLibrary.Core.Models.Pro6PP;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using RestSharp;
-using RestSharp.Serializers.NewtonsoftJson;
 
 namespace GeeksCoreLibrary.Core.Services
 {
@@ -31,7 +30,6 @@ namespace GeeksCoreLibrary.Core.Services
 
             // Create client and request.
             var restClient = new RestClient("https://api.pro6pp.nl");
-            restClient.UseNewtonsoftJson();
 
             var restRequest = new RestRequest("/v1/autocomplete", Method.Get);
             restRequest.AddQueryParameter("auth_key", authKey);

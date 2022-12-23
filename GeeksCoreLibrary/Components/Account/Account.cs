@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web;
@@ -31,7 +32,6 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
-using Newtonsoft.Json;
 using Constants = GeeksCoreLibrary.Components.Account.Models.Constants;
 
 namespace GeeksCoreLibrary.Components.Account
@@ -262,7 +262,7 @@ namespace GeeksCoreLibrary.Components.Account
         /// <inheritdoc />
         public override void ParseSettingsJson(string settingsJson, int? forcedComponentMode = null)
         {
-            Settings = JsonConvert.DeserializeObject<AccountCmsSettingsModel>(settingsJson) ?? new AccountCmsSettingsModel();
+            Settings = JsonSerializer.Deserialize<AccountCmsSettingsModel>(settingsJson) ?? new AccountCmsSettingsModel();
             if (forcedComponentMode.HasValue)
             {
                 Settings.ComponentMode = (ComponentModes)forcedComponentMode.Value;
@@ -272,7 +272,7 @@ namespace GeeksCoreLibrary.Components.Account
         /// <inheritdoc />
         public override string GetSettingsJson()
         {
-            return JsonConvert.SerializeObject(Settings);
+            return JsonSerializer.Serialize(Settings);
         }
 
         #endregion

@@ -165,7 +165,7 @@ namespace GeeksCoreLibrary.Core.Extensions
             // Also add a global filter to validate anti forgery tokens, to protect against CSRF attacks.
             if (!isApi && !gclSettings.DisableXsrfProtection)
             {
-                services.AddControllersWithViews(options => options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute())).AddNewtonsoftJson();
+                services.AddControllersWithViews(options => options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));
                 services.AddAntiforgery(options =>
                 {
                     options.HeaderName = "X-CSRF-TOKEN";
@@ -174,7 +174,7 @@ namespace GeeksCoreLibrary.Core.Extensions
             }
             else
             {
-                services.AddControllersWithViews().AddNewtonsoftJson();
+                services.AddControllersWithViews();
             }
 
             // Let MVC know about the GCL controllers.

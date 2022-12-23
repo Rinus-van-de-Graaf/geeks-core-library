@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Components.Account.Interfaces;
@@ -174,7 +175,7 @@ namespace GeeksCoreLibrary.Components.Account.Services
                     }
                 }
 
-                logger.LogTrace($"Gotten user information in Account and saved it to lifecycle cache: {Newtonsoft.Json.JsonConvert.SerializeObject(output)}");
+                logger.LogTrace($"Gotten user information in Account and saved it to lifecycle cache: {JsonSerializer.Serialize(output)}");
 
                 // Save to http context (caching during lifecycle).
                 httpContext.Items.Add(Constants.UserDataCachingKey, output);

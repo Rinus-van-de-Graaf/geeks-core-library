@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Net.Mime;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Components.Configurator.Interfaces;
@@ -17,7 +18,6 @@ using GeeksCoreLibrary.Modules.Languages.Interfaces;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using GeeksCoreLibrary.Modules.Templates.Interfaces;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json.Linq;
 using RestSharp;
 
 namespace GeeksCoreLibrary.Components.Configurator.Services
@@ -667,7 +667,7 @@ namespace GeeksCoreLibrary.Components.Configurator.Services
                     }
 
                     // Get the three different prices from the response.
-                    var responseData = JObject.Parse(restResponse.Content);
+                    var responseData = JsonNode.Parse(restResponse.Content).AsObject();
                     result.purchasePrice += GetPriceValueFromResponse(responseData, purchasePriceKey);
                     result.customerPrice += GetPriceValueFromResponse(responseData, customerPriceKey);
                     result.fromPrice += GetPriceValueFromResponse(responseData, fromPriceKey);
@@ -687,7 +687,7 @@ namespace GeeksCoreLibrary.Components.Configurator.Services
         /// <param name="responseData">The JObject from the response content.</param>
         /// <param name="key">The key the final value, separated by a comma.</param>
         /// <returns>Returns the decimal value from the response based on the given key.</returns>
-        private decimal GetPriceValueFromResponse(JObject responseData, string key)
+        private decimal GetPriceValueFromResponse(JsonObject responseData, string key)
         {
             var keyParts = new List<string>(key.Split('.'));
             var currentObject = responseData;
@@ -695,11 +695,11 @@ namespace GeeksCoreLibrary.Components.Configurator.Services
             // Step into the object till only 1 key part is left.
             while (keyParts.Count > 1)
             {
-                currentObject = (JObject)currentObject[keyParts[0]];
+                currentObject = (JsonObject)currentObject[keyParts[0]];
                 keyParts.RemoveAt(0);
             }
 
-            return Convert.ToDecimal(currentObject[keyParts[0]]);
+            return currentObject[keyParts[0]].GetValue<decimal>();
         }
 
         /// <inheritdoc />
@@ -887,19 +887,19 @@ namespace GeeksCoreLibrary.Components.Configurator.Services
                     }
 
                     // Get the three different prices from the response.
-                    var responseData = JObject.Parse(restResponse.Content);
+                    var responseData = JsonNode.Parse(restResponse.Content).AsObject();
                     var keyParts = new List<string>(supplierIdKey.Split('.'));
                     var currentObject = responseData;
 
                     // Step into the object till only 1 key part is left.
                     while (keyParts.Count > 1)
                     {
-                        currentObject = (JObject) currentObject[keyParts[0]];
+                        currentObject = (JsonObject)currentObject[keyParts[0]];
                         keyParts.RemoveAt(0);
                     }
 
                     var supplierId = currentObject[keyParts[0]].ToString();
-                    configuration.Details.Add(new WiserItemDetailModel()
+                    configuration.Details.Add(new WiserItemDetailModel
                     {
                         Key = "gcl_supplier_id",
                         Value = supplierId,

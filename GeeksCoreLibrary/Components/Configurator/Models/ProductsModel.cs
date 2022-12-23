@@ -1,9 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
+﻿using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace GeeksCoreLibrary.Components.Configurator.Models
 {
@@ -35,7 +31,7 @@ namespace GeeksCoreLibrary.Components.Configurator.Models
         /// <summary>
         /// Gets or sets the URL of the product image.
         /// </summary>
-        [JsonProperty("imageURL")]
+        [JsonPropertyName("imageURL")]
         public string ImageUrl { get; set; }
 
         /// <summary>

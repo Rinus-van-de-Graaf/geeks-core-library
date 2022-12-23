@@ -5,12 +5,12 @@ using GeeksCoreLibrary.Modules.Templates.Models;
 using HtmlAgilityPack;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.Extensions;
@@ -100,7 +100,7 @@ namespace GeeksCoreLibrary.Modules.Templates.Controllers
                         return Content(contentTemplate.Content, "text/css");
                     case TemplateTypes.Query:
                         var jsonResult = await templatesService.GetJsonResponseFromQueryAsync((QueryTemplate) contentTemplate);
-                        return Content(JsonConvert.SerializeObject(jsonResult), "application/json");
+                        return Content(JsonSerializer.Serialize(jsonResult), "application/json");
                     case TemplateTypes.Normal:
                     case TemplateTypes.Unknown:
                         return Content(contentTemplate.Content, "text/plain");
@@ -243,7 +243,7 @@ namespace GeeksCoreLibrary.Modules.Templates.Controllers
 
                 var jsonResult = await templatesService.GetJsonResponseFromQueryAsync(result);
 
-                return Content(JsonConvert.SerializeObject(jsonResult), "application/json");
+                return Content(JsonSerializer.Serialize(jsonResult), "application/json");
             }
             catch (Exception exception)
             {
@@ -280,7 +280,7 @@ namespace GeeksCoreLibrary.Modules.Templates.Controllers
 
                 var jsonResult = await templatesService.GetJsonResponseFromRoutineAsync(result);
 
-                return Content(JsonConvert.SerializeObject(jsonResult), "application/json");
+                return Content(JsonSerializer.Serialize(jsonResult), "application/json");
             }
             catch (Exception exception)
             {
@@ -314,7 +314,7 @@ namespace GeeksCoreLibrary.Modules.Templates.Controllers
                 {
                     null => Content("", "text/html"),
                     string resultString => Content(resultString, "text/html"),
-                    _ => Content(JsonConvert.SerializeObject(!resultObject.HasValue ? result : resultObject.Value.Data), "application/json")
+                    _ => Content(JsonSerializer.Serialize(!resultObject.HasValue ? result : resultObject.Value.Data), "application/json")
                 };
             }
             catch (Exception exception)

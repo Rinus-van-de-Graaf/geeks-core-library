@@ -1,5 +1,5 @@
 ﻿using System.Collections.Generic;
-using Newtonsoft.Json;
+using System.Text.Json.Serialization;
 
 namespace GeeksCoreLibrary.Components.Configurator.Models
 {
@@ -8,36 +8,36 @@ namespace GeeksCoreLibrary.Components.Configurator.Models
         /// <summary>
         /// Gets or sets the name of the configurator.
         /// </summary>
-        [JsonProperty("configurator")]
+        [JsonPropertyName("configurator")]
         public string Configurator { get; set; }
 
         /// <summary>
         /// Gets or sets the URL of the image.
         /// </summary>
-        [JsonProperty("image")]
+        [JsonPropertyName("image")]
         public string Image { get; set; }
 
         /// <summary>
         /// Gets or sets the amount of times the user wants to order this configuration.
         /// </summary>
-        [JsonProperty("quantity")]
+        [JsonPropertyName("quantity")]
         public int Quantity { get; set; } = 1;
 
         /// <summary>
         /// Gets or sets all items/steps. The keys are either the index or the ID of the item (depending on which model was sent via javascript).
         /// </summary>
         /// 
-        [JsonProperty("items")]
+        [JsonPropertyName("items")]
         public Dictionary<string, StepsModel> Items { get; set; }
 
         /// <summary>
         /// Gets or sets Custom variables
         /// </summary>
         /// 
-        [JsonProperty("customValues")]
+        [JsonPropertyName("customValues")]
         public Dictionary<string, string> CustomValues { get; set; } = new Dictionary<string, string>();
 
-        [JsonProperty("qsItems")]
+        [JsonPropertyName("qsItems")]
         public Dictionary<string, string> QueryStringItems { get; set; } = new Dictionary<string, string>();
     }
 }

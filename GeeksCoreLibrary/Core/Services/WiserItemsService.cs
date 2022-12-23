@@ -3,8 +3,6 @@ using GeeksCoreLibrary.Core.Enums;
 using GeeksCoreLibrary.Core.Extensions;
 using GeeksCoreLibrary.Core.Interfaces;
 using GeeksCoreLibrary.Core.Models;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -12,13 +10,14 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GeeksCoreLibrary.Core.Exceptions;
 using GeeksCoreLibrary.Modules.Databases.Interfaces;
 using GeeksCoreLibrary.Modules.Databases.Models;
 using GeeksCoreLibrary.Modules.DataSelector.Interfaces;
-using GeeksCoreLibrary.Modules.DataSelector.Models;
 using GeeksCoreLibrary.Modules.GclReplacements.Interfaces;
 using GeeksCoreLibrary.Modules.Objects.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -833,9 +832,10 @@ WHERE item.id = ?itemId");
 
                                 // Collect the new destination IDs from the itemDetail.
                                 var destinationIds = new List<int>();
-                                if (itemDetail.Value is JArray valueAsJsonArray)
+
+                                if (itemDetail.Value is JsonArray valueAsJsonArray)
                                 {
-                                    destinationIds = valueAsJsonArray.Cast<object>().Select(Convert.ToInt32).ToList();
+                                    destinationIds = valueAsJsonArray.Cast<JsonValue>().Select(v => v.GetValue<int>()).ToList();
                                 }
                                 else if (Int32.TryParse(itemDetail.Value?.ToString(), out var integerValue))
                                 {
@@ -2593,7 +2593,7 @@ LEFT JOIN {tablePrefix}{WiserTableNames.WiserItemDetail}{WiserTableNames.Archive
                 var options = new Dictionary<string, object>();
                 if (!String.IsNullOrWhiteSpace(optionsJson))
                 {
-                    options = JsonConvert.DeserializeObject<Dictionary<string, object>>(optionsJson) ?? new Dictionary<string, object>();
+                    options = JsonSerializer.Deserialize<Dictionary<string, object>>(optionsJson) ?? new Dictionary<string, object>();
                 }
 
                 options.Add(FieldTypeKey, fieldType);
@@ -2653,7 +2653,7 @@ LEFT JOIN {tablePrefix}{WiserTableNames.WiserItemDetail}{WiserTableNames.Archive
                 var options = new Dictionary<string, object>();
                 if (!String.IsNullOrWhiteSpace(optionsJson))
                 {
-                    options = JsonConvert.DeserializeObject<Dictionary<string, object>>(optionsJson) ?? new Dictionary<string, object>();
+                    options = JsonSerializer.Deserialize<Dictionary<string, object>>(optionsJson) ?? new Dictionary<string, object>();
                 }
 
                 options.Add(FieldTypeKey, fieldType);
@@ -3298,7 +3298,7 @@ LEFT JOIN {tablePrefix}{WiserTableNames.WiserItemDetail}{WiserTableNames.Archive
             databaseConnection.AddParameter("extension", wiserItemFile.Extension);
             databaseConnection.AddParameter("title", wiserItemFile.Title);
             databaseConnection.AddParameter("propertyName", wiserItemFile.PropertyName);
-            databaseConnection.AddParameter("extraData", wiserItemFile.ExtraData == null ? null : JsonConvert.SerializeObject(wiserItemFile.ExtraData));
+            databaseConnection.AddParameter("extraData", wiserItemFile.ExtraData == null ? null : JsonSerializer.Serialize(wiserItemFile.ExtraData));
             databaseConnection.AddParameter("username", username);
             databaseConnection.AddParameter("userId", userId);
             databaseConnection.AddParameter("saveHistoryGcl", saveHistory); // This is used in triggers.
@@ -3735,7 +3735,7 @@ LEFT JOIN {tablePrefix}{WiserTableNames.WiserItemDetail}{WiserTableNames.Archive
                 var options = dataRow.Field<string>("aggregate_options");
                 if (!String.IsNullOrWhiteSpace(options))
                 {
-                    optionsModel = JsonConvert.DeserializeObject<WiserItemPropertyAggregateOptionsModel>(options) ?? new WiserItemPropertyAggregateOptionsModel();
+                    optionsModel = JsonSerializer.Deserialize<WiserItemPropertyAggregateOptionsModel>(options) ?? new WiserItemPropertyAggregateOptionsModel();
                 }
 
                 optionsModel.EntityType = dataRow.Field<string>("entity_name");
@@ -4235,7 +4235,7 @@ LEFT JOIN {tablePrefix}{WiserTableNames.WiserItemDetail}{WiserTableNames.Archive
                 Extension = dataRow.Field<string>("extension"),
                 Title = dataRow.Field<string>("title"),
                 PropertyName = dataRow.Field<string>("property_name"),
-                ExtraData = dataRow.IsNull("extra_data") ? null : JsonConvert.DeserializeObject<WiserItemFileExtraDataModel>(dataRow.Field<string>("extra_data")!)
+                ExtraData = dataRow.IsNull("extra_data") ? null : JsonSerializer.Deserialize<WiserItemFileExtraDataModel>(dataRow.Field<string>("extra_data")!)
             };
         }
 
@@ -4331,9 +4331,9 @@ LEFT JOIN {tablePrefix}{WiserTableNames.WiserItemDetail}{WiserTableNames.Archive
                         break;
                     }
 
-                case JArray valueAsJsonArray:
+                case JsonArray valueAsJsonArray:
                     {
-                        var valueAsList = valueAsJsonArray.Cast<object>().ToList();
+                        var valueAsList = valueAsJsonArray.Cast<JsonValue>().ToList();
                         var value = String.Join(",", valueAsList);
                         valueChanged = previousField?.Value?.ToString() != value;
                         useLongValueColumn = value.Length > 1000;
