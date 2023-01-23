@@ -9,15 +9,11 @@ namespace GeeksCoreLibrary.Modules.Exports.Enumerations;
 public enum ExcelWorkbookStyles
 {
     /// <summary>
-    /// A default style sheet. Note: Don't set this for strings!
-    /// </summary>
-    Default = 0,
-    /// <summary>
     /// A style sheet for dates without the time part.
     /// </summary>
-    Date = 1,
+    Date = 0,
     /// <summary>
     /// A style sheet for dates that include the time part.
     /// </summary>
-    DateTime = 2
+    DateTime = 1
 }
