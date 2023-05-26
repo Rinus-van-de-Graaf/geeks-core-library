@@ -623,6 +623,11 @@ ORDER BY mainStepOrdering, stepOrdering, subStepOrdering";
                     stepName = dataRow.Field<string>("stepTitle").ConvertToSeo();
                 }
 
+                var requiredErrorMessage = await stringReplacementsService.DoAllReplacementsAsync(dataRow.Field<string>("requiredErrorMessage"));
+                var minimumValueErrorMessage = await stringReplacementsService.DoAllReplacementsAsync(dataRow.Field<string>("minimumValueErrorMessage"));
+                var maximumValueErrorMessage = await stringReplacementsService.DoAllReplacementsAsync(dataRow.Field<string>("maximumValueErrorMessage"));
+                var validationRegexErrorMessage = await stringReplacementsService.DoAllReplacementsAsync(dataRow.Field<string>("validationRegexErrorMessage"));
+
                 var step = new VueStepDataModel
                 {
                     Position = dataRow.Field<string>("position"),
@@ -631,10 +636,10 @@ ORDER BY mainStepOrdering, stepOrdering, subStepOrdering";
                     MinimumValue = dataRow.Field<string>("minimumValue"),
                     MaximumValue = dataRow.Field<string>("maximumValue"),
                     ValidationRegex = dataRow.Field<string>("validationRegex"),
-                    RequiredErrorMessage = dataRow.Field<string>("requiredErrorMessage"),
-                    MinimumValueErrorMessage = dataRow.Field<string>("minimumValueErrorMessage"),
-                    MaximumValueErrorMessage = dataRow.Field<string>("maximumValueErrorMessage"),
-                    ValidationRegexErrorMessage = dataRow.Field<string>("validationRegexErrorMessage"),
+                    RequiredErrorMessage = requiredErrorMessage,
+                    MinimumValueErrorMessage = minimumValueErrorMessage,
+                    MaximumValueErrorMessage = maximumValueErrorMessage,
+                    ValidationRegexErrorMessage = validationRegexErrorMessage,
                     IsRequired = Convert.ToBoolean(dataRow["isRequired"]),
                     RequiredConditions = requiredConditions,
                     DataQuery = dataRow.Field<string>("dataQuery")
