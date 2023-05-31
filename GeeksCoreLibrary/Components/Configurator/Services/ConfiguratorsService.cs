@@ -421,6 +421,7 @@ namespace GeeksCoreLibrary.Components.Configurator.Services
     maximumValueErrorMessage,
     validationRegexErrorMessage,
     dataQuery,
+    urlRegex,
     CONCAT_WS('-', mainStepOrdering - 1, stepOrdering - 1, subStepOrdering - 1) AS position
 FROM (
     SELECT
@@ -439,6 +440,7 @@ FROM (
         maximumValueErrorMessage.`value` AS maximumValueErrorMessage,
         validationRegexErrorMessage.`value` AS validationRegexErrorMessage,
         CONCAT_WS('', dataQuery.`value`, dataQuery.long_value) AS dataQuery,
+        urlRegex.`value` AS urlRegex,
         mainStepLink.ordering AS mainStepOrdering,
         NULL AS stepOrdering,
         NULL AS subStepOrdering
@@ -462,6 +464,7 @@ FROM (
     LEFT JOIN {WiserTableNames.WiserItemDetail} AS validationRegexErrorMessage ON validationRegexErrorMessage.item_id = mainStep.id AND validationRegexErrorMessage.`key` = 'validation_regex_error_message'
 
     LEFT JOIN {WiserTableNames.WiserItemDetail} AS dataQuery ON dataQuery.item_id = mainStep.id AND dataQuery.`key` = 'custom_query'
+    LEFT JOIN {WiserTableNames.WiserItemDetail} AS urlRegex ON urlRegex.item_id = mainStep.id AND urlRegex.`key` = 'urlregex'
 
     WHERE configurator.moduleid = {ConfiguratorModuleId} AND configurator.entity_type = '{ConfiguratorEntity}' AND configurator.title = ?name
 
@@ -483,6 +486,7 @@ FROM (
         maximumValueErrorMessage.`value` AS maximumValueErrorMessage,
         validationRegexErrorMessage.`value` AS validationRegexErrorMessage,
         CONCAT_WS('', dataQuery.`value`, dataQuery.long_value) AS dataQuery,
+        urlRegex.`value` AS urlRegex,
         mainStepLink.ordering AS mainStepOrdering,
         stepLink.ordering AS stepOrdering,
         NULL AS subStepOrdering
@@ -509,6 +513,7 @@ FROM (
     LEFT JOIN {WiserTableNames.WiserItemDetail} AS validationRegexErrorMessage ON validationRegexErrorMessage.item_id = step.id AND validationRegexErrorMessage.`key` = 'validation_regex_error_message'
 
     LEFT JOIN {WiserTableNames.WiserItemDetail} AS dataQuery ON dataQuery.item_id = step.id AND dataQuery.`key` = 'custom_query'
+    LEFT JOIN {WiserTableNames.WiserItemDetail} AS urlRegex ON urlRegex.item_id = step.id AND urlRegex.`key` = 'urlregex'
 
     WHERE configurator.moduleid = {ConfiguratorModuleId} AND configurator.entity_type = '{ConfiguratorEntity}' AND configurator.title = ?name
 
@@ -530,6 +535,7 @@ FROM (
         maximumValueErrorMessage.`value` AS maximumValueErrorMessage,
         validationRegexErrorMessage.`value` AS validationRegexErrorMessage,
         CONCAT_WS('', dataQuery.`value`, dataQuery.long_value) AS dataQuery,
+        urlRegex.`value` AS urlRegex,
         mainStepLink.ordering AS mainStepOrdering,
         stepLink.ordering AS stepOrdering,
         subStepLink.ordering AS subStepOrdering
@@ -559,6 +565,7 @@ FROM (
     LEFT JOIN {WiserTableNames.WiserItemDetail} AS validationRegexErrorMessage ON validationRegexErrorMessage.item_id = subStep.id AND validationRegexErrorMessage.`key` = 'validation_regex_error_message'
 
     LEFT JOIN {WiserTableNames.WiserItemDetail} AS dataQuery ON dataQuery.item_id = subStep.id AND dataQuery.`key` = 'custom_query'
+    LEFT JOIN {WiserTableNames.WiserItemDetail} AS urlRegex ON urlRegex.item_id = subStep.id AND urlRegex.`key` = 'urlregex'
 
     WHERE configurator.moduleid = {ConfiguratorModuleId} AND configurator.entity_type = '{ConfiguratorEntity}' AND configurator.title = ?name
 ) t
@@ -642,7 +649,8 @@ ORDER BY mainStepOrdering, stepOrdering, subStepOrdering";
                     ValidationRegexErrorMessage = validationRegexErrorMessage,
                     IsRequired = Convert.ToBoolean(dataRow["isRequired"]),
                     RequiredConditions = requiredConditions,
-                    DataQuery = dataRow.Field<string>("dataQuery")
+                    DataQuery = dataRow.Field<string>("dataQuery"),
+                    UrlRegex = dataRow.Field<string>("urlRegex")
                 };
 
                 steps.Add(step);

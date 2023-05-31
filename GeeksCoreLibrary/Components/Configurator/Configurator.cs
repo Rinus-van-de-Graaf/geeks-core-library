@@ -1571,9 +1571,9 @@ namespace GeeksCoreLibrary.Components.Configurator
         /// <summary>
         /// Retrieve configurator data for the Vue configurator.
         /// </summary>
-        /// <param name="steps">The names of the steps to update.</param>
+        /// <param name="steps">The names of the steps to retrieve. If null or empty, all steps are retrieved.</param>
         /// <param name="configuration">The current configuration from the client-side.</param>
-        /// <returns></returns>
+        /// <returns>A <see cref="VueConfiguratorDataModel"/> object containing the steps data for the <see cref="VueConfigurationsModel.ConfiguratorName"/> set in the <paramref name="configuration"/> parameter.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="steps"/> or <paramref name="configuration"/> is null.</exception>
         public async Task<VueConfiguratorDataModel> GetConfiguratorData(List<string> steps, VueConfigurationsModel configuration)
         {
@@ -1584,6 +1584,7 @@ namespace GeeksCoreLibrary.Components.Configurator
             {
                 throw new ArgumentNullException(nameof(configuration));
             }
+
             var result = await configuratorsService.GetVueConfiguratorDataAsync(configuration.ConfiguratorName);
             if (result == null || result.StepsData.Count == 0)
             {
@@ -1600,6 +1601,8 @@ namespace GeeksCoreLibrary.Components.Configurator
                 stepsToProcess = steps;
             }
 
+            var stepsToRemove = new List<string>();
+
             // Update options.
             foreach (var step in stepsToProcess)
             {
@@ -1607,6 +1610,17 @@ namespace GeeksCoreLibrary.Components.Configurator
                 if (stepData == null)
                 {
                     continue;
+                }
+
+                // Check if the regex matches the current URL and if not, remove the step.
+                if (!String.IsNullOrWhiteSpace(stepData.UrlRegex))
+                {
+                    var currentUrl = HttpContextHelpers.GetBaseUri(HttpContext).AbsoluteUri;
+                    if (!Regex.IsMatch(currentUrl, stepData.UrlRegex, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(2000)))
+                    {
+                        stepsToRemove.Add(step);
+                        continue;
+                    }
                 }
 
                 var options = new List<Dictionary<string, object>>();
@@ -1681,10 +1695,12 @@ namespace GeeksCoreLibrary.Components.Configurator
                 stepData.Options = options;
             }
 
-            if (steps == null) return result;
+            // Remove the steps listed in stepsToRemove from the result.
+            if (stepsToRemove.Count > 0)
+            {
+                result.StepsData.RemoveAll(x => stepsToRemove.Contains(x.StepName, StringComparer.OrdinalIgnoreCase));
+            }
 
-            var filteredSteps = result.StepsData.Where(s => steps.Contains(s.StepName, StringComparer.OrdinalIgnoreCase)).ToList();
-            result.StepsData = filteredSteps;
             return result;
         }
 

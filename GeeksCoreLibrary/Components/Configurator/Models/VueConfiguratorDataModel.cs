@@ -9,5 +9,5 @@ public class VueConfiguratorDataModel
     /// Gets or sets the steps data.
     /// </summary>
     [JsonProperty("stepsData")]
-    public IList<VueStepDataModel> StepsData { get; set; }
+    public List<VueStepDataModel> StepsData { get; set; }
 }
